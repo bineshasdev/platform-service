@@ -1,0 +1,31 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/cliniqai
+    username: cliniqai
+    password: cliniqai_secret
+  jpa:
+    show-sql: true
+  kafka: 
+    bootstrap-servers: localhost:9092
+  cloud:
+    consul:
+      config:
+        enabled: false
+      discovery:
+        enabled: false
+        register: false
+      host: localhost
+      port: 8500
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+
+logging:
+  level:
+    com.flowbinary: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.kafka: OFF
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql: TRACE

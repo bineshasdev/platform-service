@@ -1,0 +1,258 @@
+spring:
+  application:
+    name: platform-service
+  devtools:
+    restart:
+      additional-exclude: "software/amazon/**"
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  
+
+  # ── Database ─────────────────────────────────────────────────────
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://127.0.0.1:5432/postgres}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: platform-service-pool
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+        generate_statistics: false
+
+  flyway:
+    enabled: true
+    validate-on-migrate: false   # dev only — skips checksum validation on existing migrations
+
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: ${STORAGE_MAX_FILE_SIZE:50MB}
+      max-request-size: ${STORAGE_MAX_REQUEST_SIZE:55MB}
+
+  # ── Consul ────────────────────────────────────────────────────────
+  cloud:
+    consul:
+      host: ${CONSUL_HOST:localhost}
+      port: ${CONSUL_PORT:8500}
+      discovery:
+        enabled: true
+        register: true
+        instance-id: ${spring.application.name}-${random.value}
+        health-check-path: /actuator/health
+        health-check-interval: 15s
+        health-check-timeout: 5s
+        prefer-ip-address: true
+        tags:
+          - version=${app.version:0.0.1}
+          - env=${spring.profiles.active}
+      config:
+        enabled: true
+        prefixes: config
+        default-context: platform-service
+        profile-separator: ':'
+        format: YAML
+        watch:
+          enabled: true
+          delay: 1000
+
+  # ── Kafka ─────────────────────────────────────────────────────────
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        "[enable.idempotence]": true
+        "[max.in.flight.requests.per.connection]": 1
+        "[spring.json.add.type.headers]": false
+    consumer:
+      group-id: ${spring.application.name}
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      properties:
+        "[spring.deserializer.value.delegate.class]": org.springframework.kafka.support.serializer.JsonDeserializer
+        "[spring.json.trusted.packages]": com.flowbinary.platformservice.event
+    listener:
+      ack-mode: MANUAL_IMMEDIATE
+      concurrency: 3
+
+  # ── Security ──────────────────────────────────────────────────────
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI:http://localhost:9080/realms/master}
+
+# ── Keycloak Admin ────────────────────────────────────────────────
+keycloak:
+  admin:
+    server-url: ${KEYCLOAK_URL:http://localhost:9080}
+    admin-realm: master
+    client-id: admin-cli
+    username: ${KEYCLOAK_ADMIN_USER:superadmin}
+    password: ${KEYCLOAK_ADMIN_PASSWORD:superadmin} 
+    app-realm: ${KEYCLOAK_REALM:master}   # realm where tenant orgs & users are created
+    login-theme: ${KEYCLOAK_LOGIN_THEME:cliniqai}  # UI theme for login + password-reset pages (empty = keep Keycloak default)
+    email-theme: ${KEYCLOAK_EMAIL_THEME:cliniqai}  # email theme for password-reset emails (empty = same as login-theme)
+
+server:
+  port: ${SERVER_PORT:8083}
+  shutdown: graceful
+  servlet:
+    context-path: /
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html
+    min-response-size: 1024
+  http2:
+    enabled: true
+
+# ── Actuator / Observability ──────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,env,loggers,circuitbreakers
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+    consul:
+      enabled: true
+    kafka:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      env: ${spring.profiles.active}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:0.1}
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_URL:http://localhost:9411/api/v2/spans}
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# ── OpenAPI ───────────────────────────────────────────────────────
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+    tagsSorter: alpha
+    display-request-duration: true
+    try-it-out-enabled: true
+  show-actuator: false
+  packages-to-scan: com.flowbinary.platformservice.controller
+
+# ── Resilience4j ─────────────────────────────────────────────────
+resilience4j:
+  circuitbreaker:
+    instances:
+      kafka-publisher:
+        register-health-indicator: true
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+  retry:
+    instances:
+      kafka-publisher:
+        max-attempts: 3
+        wait-duration: 500ms
+        retry-exceptions:
+          - org.springframework.kafka.KafkaException
+
+# ── App-level config ─────────────────────────────────────────────
+app:
+  version: 0.0.1-SNAPSHOT
+  platform:
+    name: ${PLATFORM_NAME:FlowCore}
+    support-url: ${PLATFORM_SUPPORT_URL:https://support.flowcore.io}
+    documentation-url: ${PLATFORM_DOCS_URL:https://docs.flowcore.io}
+    domain: ${PLATFORM_DOMAIN:flowcore.io}
+    logo-url: ${PLATFORM_LOGO_URL:}        # optional: CDN/external URL; falls back to /branding/{slug}/logo.png
+    favicon-url: ${PLATFORM_FAVICON_URL:}  # optional: CDN/external URL; falls back to /branding/{slug}/favicon.ico
+  environment:
+    name: ${SPRING_PROFILES_ACTIVE:development}
+    region: ${REGION:us-east-1}
+    deployment: ${DEPLOYMENT:local}
+    build-number: ${BUILD_NUMBER:local}
+  security:
+    allowed-clients:
+      - platform-ui 
+      - cliniqai-ui       # Next.js front-end (client credentials)
+      - api-gateway        # Internal API gateway
+      - admin-cli          # Keycloak admin CLI (dev/testing)
+      - internal-client     # Placeholder for other internal services
+  storage:
+    default-backend: ${STORAGE_DEFAULT_BACKEND:LOCAL}
+    default-quota-mb: ${STORAGE_DEFAULT_QUOTA_MB:512}
+    local-base-path: ${STORAGE_LOCAL_BASE_PATH:/tmp/flowcore/uploads}
+    presigned-url-ttl-seconds: ${STORAGE_PRESIGNED_TTL_SECONDS:3600}
+    s3-public-bucket: ${STORAGE_S3_PUBLIC_BUCKET:false}
+  kafka:
+    topics:
+      tenant-events: platform.tenant.events
+      feature-events: platform.feature.events
+      menu-events: platform.menu.events
+      user-events: platform.user.events
+      notification-events: platform.notification.events
+      dlq-suffix: .DLT
+    schema-registry-url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
+  notification-service:
+    base-url: ${NOTIFICATION_SERVICE_URL:http://localhost:3002}
+    internal-api-key: ${NOTIFICATION_SERVICE_INTERNAL_API_KEY:}
+    connect-timeout-ms: 3000
+    read-timeout-ms: 5000
+
+# ── Logging ───────────────────────────────────────────────────────
+logging:
+  level:
+    "[com.flowbinary.platformservice]": DEBUG
+    "[org.springframework.web.servlet]": DEBUG
+    "[org.springframework.web.servlet.DispatcherServlet]": TRACE
+    "[org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping]": TRACE
+    "[org.springframework.security]": DEBUG
+    "[org.springframework.security.web.FilterChainProxy]": DEBUG
+    "[org.springframework.kafka]": OFF
+    "[org.apache.kafka]": OFF
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{spanId:-}]"
