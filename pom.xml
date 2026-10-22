@@ -18,6 +18,8 @@
 
     <properties>
         <java.version>17</java.version>
+        <!-- Boot 3.5.0 manages Lombok 1.18.38; the IDE's newer Java compiler mis-handles it (bogus "Flexible Constructor Bodies" errors). -->
+        <lombok.version>1.18.46</lombok.version>
         <spring-cloud.version>2025.0.0</spring-cloud.version>
         <hypersistence-utils.version>3.9.0</hypersistence-utils.version>
         <springdoc.version>2.8.3</springdoc.version>

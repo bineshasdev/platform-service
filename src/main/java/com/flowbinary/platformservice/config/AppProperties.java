@@ -19,7 +19,15 @@ public class AppProperties {
     private PlatformProperties    platform    = new PlatformProperties();
     private EnvironmentProperties environment = new EnvironmentProperties();
     private StorageConfigProperties storage   = new StorageConfigProperties();
+    private MenuProperties        menu        = new MenuProperties();
     private NotificationServiceProperties notificationService = new NotificationServiceProperties();
+
+    @Getter
+    @Setter
+    public static class MenuProperties {
+        /** Maximum number of menu levels (root = level 1). Enforced on every write. */
+        private int maxDepth = 4;
+    }
 
     @Getter
     @Setter

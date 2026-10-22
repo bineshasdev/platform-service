@@ -3,6 +3,7 @@ package com.flowbinary.platformservice.model;
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.Type;
 
 import java.util.ArrayList;
@@ -17,6 +18,7 @@ import java.util.UUID;
  * Maps to: roles
  */
 @Entity
+@BatchSize(size = 100)
 @Table(name = "roles")
 @Getter
 @Setter

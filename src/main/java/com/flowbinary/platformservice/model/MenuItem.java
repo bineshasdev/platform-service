@@ -3,6 +3,7 @@ package com.flowbinary.platformservice.model;
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.Type;
 
 import java.time.Instant;
@@ -70,6 +71,17 @@ public class MenuItem extends BaseEntity {
     @Builder.Default
     private MenuTarget target = MenuTarget.SELF;
 
+    /** Whether activating the item navigates, expands its children, or both. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "behavior", nullable = false)
+    @Builder.Default
+    private MenuBehavior behavior = MenuBehavior.NAVIGATE;
+
+    /** Render a divider above this item. */
+    @Column(name = "is_separator_before", nullable = false)
+    @Builder.Default
+    private Boolean separatorBefore = false;
+
     @Column(name = "sort_order", nullable = false)
     @Builder.Default
     private Integer sortOrder = 0;
@@ -116,14 +128,17 @@ public class MenuItem extends BaseEntity {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    @BatchSize(size = 200)
     @OneToMany(mappedBy = "menuItem", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @Builder.Default
     private List<MenuRoleAccess> roleAccess = new ArrayList<>();
 
+    @BatchSize(size = 200)
     @OneToMany(mappedBy = "menuItem", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @Builder.Default
     private List<MenuPlanAccess> planAccess = new ArrayList<>();
 
+    @BatchSize(size = 200)
     @OneToMany(mappedBy = "menuItem", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @Builder.Default
     private List<MenuItemTranslation> translations = new ArrayList<>();

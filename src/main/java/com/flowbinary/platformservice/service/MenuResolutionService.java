@@ -16,16 +16,11 @@ import java.util.stream.Collectors;
  *
  * <p>An item is included when all of the following hold:
  * <ol>
- *   <li>it is live in the requested application — active, visible, not soft-deleted;</li>
- *   <li>the tenant's plan is in {@code menu_plan_access};</li>
- *   <li>its {@code required_feature} is null or enabled for that plan;</li>
- *   <li>its {@code required_privilege} is null or held by the user;</li>
- *   <li>some role the user holds grants it, or the user is granted it directly;</li>
- *   <li>the user has no explicit DENY on it — a deny always wins;</li>
- *   <li>the tenant has not hidden it.</li>
+ *   <li>it is live in the requested application — active, not soft-deleted;</li>
+ *   <li>{@link MenuVisibilityPolicy} lets it through (plan, feature, privilege, deny, grant, tenant hide).</li>
  * </ol>
- * Surviving items are then relabelled and reordered by any tenant override,
- * and localised to the caller's locale.
+ * {@link MenuTreeBuilder} then assembles the tree, prunes parents left without
+ * children, applies tenant relabel/reorder and localises labels.
  */
 @Service
 @RequiredArgsConstructor
@@ -108,7 +103,6 @@ public class MenuResolutionService {
         Set<String> privileges = roleIds.isEmpty()
                 ? Set.of()
                 : rolePrivilegeRepository.findPrivilegeCodesByRoleIds(roleIds);
-        boolean allPrivileges = ctx.user().getRole() == PlatformRole.SUPERADMIN;
 
         Instant now = Instant.now();
         Map<UUID, MenuAccessEffect> userOverrides = menuUserAccessRepository
@@ -122,105 +116,22 @@ public class MenuResolutionService {
                 .findByTenantId(ctx.tenant().getId()).stream()
                 .collect(Collectors.toMap(o -> o.getMenuItem().getId(), o -> o, (a, b) -> b));
 
+        MenuVisibilityPolicy.Subject subject = new MenuVisibilityPolicy.Subject(
+                roleIds,
+                privileges,
+                ctx.user().getRole() == PlatformRole.SUPERADMIN,
+                ctx.planCode(),
+                ctx.enabledFeatures(),
+                userOverrides,
+                tenantOverrides);
+
         List<MenuItem> all = menuItemRepository.findLiveByApplicationCode(ctx.applicationCode());
 
         Set<UUID> visible = all.stream()
-                .filter(m -> isVisible(m, roleIds, privileges, allPrivileges,
-                                       userOverrides, tenantOverrides, ctx))
+                .filter(m -> MenuVisibilityPolicy.evaluate(m, subject) == MenuVisibilityPolicy.Verdict.VISIBLE)
                 .map(MenuItem::getId)
                 .collect(Collectors.toSet());
 
-        Comparator<MenuItem> byOrder =
-                Comparator.comparingInt(m -> effectiveSortOrder(m, tenantOverrides));
-
-        return all.stream()
-                .filter(m -> m.getParent() == null && visible.contains(m.getId()))
-                .sorted(byOrder)
-                .map(m -> toEntry(m, visible, tenantOverrides, byOrder, ctx.locale()))
-                .filter(Objects::nonNull)
-                .toList();
-    }
-
-    private static boolean isVisible(MenuItem item,
-                                     Set<UUID> roleIds,
-                                     Set<String> privileges,
-                                     boolean allPrivileges,
-                                     Map<UUID, MenuAccessEffect> userOverrides,
-                                     Map<UUID, MenuTenantOverride> tenantOverrides,
-                                     MenuContext ctx) {
-
-        MenuAccessEffect effect = userOverrides.get(item.getId());
-        if (effect == MenuAccessEffect.DENY) return false;
-
-        MenuTenantOverride override = tenantOverrides.get(item.getId());
-        if (override != null && Boolean.TRUE.equals(override.getIsHidden())) return false;
-
-        if (!Boolean.TRUE.equals(item.getIsVisible())) return false;
-
-        boolean planAllowed = item.getPlanAccess().stream()
-                .anyMatch(pa -> pa.getId().getPlan().name().equalsIgnoreCase(ctx.planCode()));
-        if (!planAllowed) return false;
-
-        String feature = item.getRequiredFeature();
-        if (feature != null && !ctx.enabledFeatures().contains(feature)) return false;
-
-        Privilege required = item.getRequiredPrivilege();
-        if (required != null && !allPrivileges && !privileges.contains(required.getCode())) {
-            return false;
-        }
-
-        if (allPrivileges || effect == MenuAccessEffect.GRANT) return true;
-
-        // Compare on the FK in the composite id — no need to load each Role.
-        return item.getRoleAccess().stream()
-                .anyMatch(ra -> roleIds.contains(ra.getId().getRoleId()));
-    }
-
-    private static MenuEntry toEntry(MenuItem item,
-                                     Set<UUID> visible,
-                                     Map<UUID, MenuTenantOverride> overrides,
-                                     Comparator<MenuItem> byOrder,
-                                     String locale) {
-
-        List<MenuEntry> children = item.getChildren().stream()
-                .filter(c -> visible.contains(c.getId()))
-                .sorted(byOrder)
-                .map(c -> toEntry(c, visible, overrides, byOrder, locale))
-                .filter(Objects::nonNull)
-                .toList();
-
-        // A group that leads nowhere and has nothing left under it is noise.
-        if (children.isEmpty() && item.getRoute() == null && item.getType() == MenuItemType.GROUP) {
-            return null;
-        }
-
-        MenuTenantOverride override = overrides.get(item.getId());
-        String label = override != null && override.getLabel() != null
-                ? override.getLabel()
-                : item.labelFor(locale);
-        String icon = override != null && override.getIcon() != null
-                ? override.getIcon()
-                : item.getIcon();
-
-        List<String> roleCodes = item.getRoleAccess().stream()
-                .map(ra -> ra.getRole().getCode())
-                .sorted()
-                .toList();
-
-        return MenuEntry.builder()
-                .id(item.getCode())
-                .label(label)
-                .icon(icon)
-                .path(item.getRoute())
-                .roles(roleCodes.isEmpty() ? null : roleCodes)
-                .feature(item.getRequiredFeature())
-                .children(children.isEmpty() ? null : children)
-                .build();
-    }
-
-    private static int effectiveSortOrder(MenuItem item, Map<UUID, MenuTenantOverride> overrides) {
-        MenuTenantOverride override = overrides.get(item.getId());
-        if (override != null && override.getSortOrder() != null) return override.getSortOrder();
-        return item.getSortOrder();
+        return MenuTreeBuilder.build(all, visible, tenantOverrides, ctx.locale());
     }
 }

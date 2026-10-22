@@ -1,7 +1,6 @@
 package com.flowbinary.platformservice.config;
 
 import com.flowbinary.platformservice.model.PlatformRole;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.RealmResource;
@@ -22,11 +21,15 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class KeycloakRoleInitializer implements ApplicationRunner {
 
     private final Keycloak     keycloakAdmin;
     private final KeycloakProperties kcProps;
+
+    public KeycloakRoleInitializer(Keycloak keycloakAdmin, KeycloakProperties kcProps) {
+        this.keycloakAdmin = keycloakAdmin;
+        this.kcProps = kcProps;
+    }
 
     @Override
     public void run(ApplicationArguments args) {

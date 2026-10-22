@@ -1,6 +1,5 @@
 package com.flowbinary.platformservice.config;
 
-import lombok.RequiredArgsConstructor;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.KeycloakBuilder;
 import org.springframework.context.annotation.Bean;
@@ -13,10 +12,13 @@ import org.springframework.context.annotation.Configuration;
  * users, and roles in the configured application realm.
  */
 @Configuration
-@RequiredArgsConstructor
 public class KeycloakAdminConfig {
 
     private final KeycloakProperties props;
+
+    public KeycloakAdminConfig(KeycloakProperties props) {
+        this.props = props;
+    }
 
     @Bean
     Keycloak keycloakAdminClient() {

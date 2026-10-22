@@ -28,9 +28,7 @@ public class BootstrapService {
     private final TenantSubscriptionRepository subscriptionRepository;
     private final PlanFeatureRepository        planFeatureRepository;
     private final MenuResolutionService        menuResolutionService;
-    private final AppSettingRepository         appSettingRepository;
-    private final TenantSettingRepository      tenantSettingRepository;
-    private final UserSettingRepository        userSettingRepository;
+    private final SettingsResolver             settingsResolver;
 
     /** Settings-menu entries, each gated by the privilege that makes it usable. */
     private static final List<SettingsEntry> SETTINGS_MENU = List.of(
@@ -76,7 +74,7 @@ public class BootstrapService {
                 : List.of();
 
         // ── Settings (merged: app → tenant → user) ─────────────────────────
-        Map<String, String> settings = mergeSettings(tenant.getId(), authUserId);
+        Map<String, String> settings = settingsResolver.merged(tenant.getId(), authUserId);
 
         // ── Effective privileges, then the menu they unlock ────────────────
         Set<String> privileges = menuResolutionService.effectivePrivileges(user);
@@ -283,19 +281,6 @@ public class BootstrapService {
                 .deployment(env.getDeployment())
                 .buildNumber(env.getBuildNumber())
                 .build();
-    }
-
-    // ── Settings merge ─────────────────────────────────────────────────────
-
-    private Map<String, String> mergeSettings(UUID tenantId, UUID authUserId) {
-        Map<String, String> merged = new LinkedHashMap<>();
-        appSettingRepository.findAllWithDefinition()
-                .forEach(s -> merged.put(s.getDefinition().getKey(), s.getValue()));
-        tenantSettingRepository.findAllByTenantId(tenantId)
-                .forEach(s -> merged.put(s.getDefinition().getKey(), s.getValue()));
-        userSettingRepository.findByUserId(authUserId)
-                .forEach(s -> merged.put(s.getDefinition().getKey(), s.getValue()));
-        return merged;
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────
