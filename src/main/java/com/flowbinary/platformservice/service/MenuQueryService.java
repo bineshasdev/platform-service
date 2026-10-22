@@ -47,6 +47,23 @@ public class MenuQueryService {
                 .findByTenantIdAndAuthUserId(tenant.getId(), authUserId)
                 .orElseThrow(() -> new TenantNotFoundException("User not found in tenant: " + authUserId));
 
+        PlanContext planContext = planContext(tenant);
+
+        Map<String, String> settings = settingsResolver.merged(tenant.getId(), authUserId);
+
+        return menuResolutionService.resolve(new MenuResolutionService.MenuContext(
+                tenant, user, applicationCode,
+                planContext.planCode(),
+                planContext.features(),
+                settings.getOrDefault("locale", "en")));
+    }
+
+    /** The plan code and enabled feature codes menu gating needs for a tenant. */
+    public record PlanContext(String planCode, Set<String> features) {
+    }
+
+    @Transactional(readOnly = true)
+    public PlanContext planContext(Tenant tenant) {
         Plan plan = subscriptionRepository.findActiveByTenantId(tenant.getId())
                 .map(TenantSubscription::getPlan)
                 .orElse(null);
@@ -55,13 +72,6 @@ public class MenuQueryService {
                         .filter(pf -> Boolean.TRUE.equals(pf.getEnabled()))
                         .map(pf -> pf.getFeature().getCode())
                         .collect(Collectors.toSet());
-
-        Map<String, String> settings = settingsResolver.merged(tenant.getId(), authUserId);
-
-        return menuResolutionService.resolve(new MenuResolutionService.MenuContext(
-                tenant, user, applicationCode,
-                plan != null ? plan.getCode().name() : "free",
-                features,
-                settings.getOrDefault("locale", "en")));
+        return new PlanContext(plan != null ? plan.getCode().name() : "free", features);
     }
 }

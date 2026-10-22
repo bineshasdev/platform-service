@@ -76,6 +76,38 @@ public class GlobalExceptionHandler {
         return pd;
     }
 
+    // ── Menu administration ───────────────────────────────────────────────────
+
+    @ExceptionHandler(MenuDraftException.class)
+    ProblemDetail handleMenuDraft(MenuDraftException ex) {
+        ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        pd.setTitle("Menu change rejected");
+        pd.setDetail(ex.getMessage());
+        pd.setType(URI.create("urn:problem:menu-draft-invalid"));
+        if (ex.getOpIndex() >= 0) pd.setProperty("opIndex", ex.getOpIndex());
+        return pd;
+    }
+
+    @ExceptionHandler(MenuHierarchyException.class)
+    ProblemDetail handleMenuHierarchy(MenuHierarchyException ex) {
+        ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        pd.setTitle("Menu hierarchy invalid");
+        pd.setDetail(ex.getMessage());
+        pd.setType(URI.create("urn:problem:menu-hierarchy"));
+        pd.setProperty("reason", ex.getReason().name());
+        return pd;
+    }
+
+    @ExceptionHandler({MenuConflictException.class, org.springframework.dao.OptimisticLockingFailureException.class})
+    ProblemDetail handleMenuConflict(RuntimeException ex) {
+        ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        pd.setTitle("Conflict");
+        pd.setDetail(ex instanceof MenuConflictException ? ex.getMessage()
+                : "The record was changed by someone else; reload and retry");
+        pd.setType(URI.create("urn:problem:conflict"));
+        return pd;
+    }
+
     // ── Storage ───────────────────────────────────────────────────────────────
 
     @ExceptionHandler(QuotaExceededException.class)

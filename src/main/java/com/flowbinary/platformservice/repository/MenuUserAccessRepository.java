@@ -12,5 +12,16 @@ import java.util.UUID;
 public interface MenuUserAccessRepository extends JpaRepository<MenuUserAccess, UUID> {
     List<MenuUserAccess> findByUserId(UUID userId);
     Optional<MenuUserAccess> findByUserIdAndMenuItemId(UUID userId, UUID menuItemId);
+
+    /** A tenant's user-level assignments within one application. */
+    @org.springframework.data.jpa.repository.Query("""
+            SELECT a FROM MenuUserAccess a
+            JOIN FETCH a.menuItem mi JOIN FETCH a.user u
+            WHERE u.tenant.id = :tenantId AND mi.application.id = :applicationId
+            """)
+    List<MenuUserAccess> findForTenantAndApplication(
+            @org.springframework.data.repository.query.Param("tenantId") UUID tenantId,
+            @org.springframework.data.repository.query.Param("applicationId") UUID applicationId);
+
     void deleteByUserIdAndMenuItemId(UUID userId, UUID menuItemId);
 }

@@ -100,10 +100,6 @@ public class MenuResolutionService {
                 .map(Role::getId)
                 .collect(Collectors.toSet());
 
-        Set<String> privileges = roleIds.isEmpty()
-                ? Set.of()
-                : rolePrivilegeRepository.findPrivilegeCodesByRoleIds(roleIds);
-
         Instant now = Instant.now();
         Map<UUID, MenuAccessEffect> userOverrides = menuUserAccessRepository
                 .findByUserId(ctx.user().getId()).stream()
@@ -112,20 +108,42 @@ public class MenuResolutionService {
                                           MenuUserAccess::getEffect,
                                           (a, b) -> b));
 
+        return resolveFor(ctx.tenant(), roleIds, ctx.user().getRole() == PlatformRole.SUPERADMIN,
+                userOverrides, ctx);
+    }
+
+    /**
+     * The menu a holder of one role would see, with no user-level overrides.
+     * Used by the admin preview; inherited parent roles are folded in.
+     */
+    @Transactional(readOnly = true)
+    public List<MenuEntry> resolveForRole(Role role, MenuContext ctx) {
+        Set<UUID> roleIds = expandInherited(List.of(role)).stream()
+                .map(Role::getId)
+                .collect(Collectors.toSet());
+        return resolveFor(ctx.tenant(), roleIds, false, Map.of(), ctx);
+    }
+
+    private List<MenuEntry> resolveFor(Tenant tenant, Set<UUID> roleIds, boolean allPrivileges,
+                                       Map<UUID, MenuAccessEffect> userOverrides, MenuContext ctx) {
+        Set<String> privileges = roleIds.isEmpty()
+                ? Set.of()
+                : rolePrivilegeRepository.findPrivilegeCodesByRoleIds(roleIds);
+
         Map<UUID, MenuTenantOverride> tenantOverrides = menuTenantOverrideRepository
-                .findByTenantId(ctx.tenant().getId()).stream()
+                .findByTenantId(tenant.getId()).stream()
                 .collect(Collectors.toMap(o -> o.getMenuItem().getId(), o -> o, (a, b) -> b));
 
         MenuVisibilityPolicy.Subject subject = new MenuVisibilityPolicy.Subject(
                 roleIds,
                 privileges,
-                ctx.user().getRole() == PlatformRole.SUPERADMIN,
+                allPrivileges,
                 ctx.planCode(),
                 ctx.enabledFeatures(),
                 userOverrides,
                 tenantOverrides);
 
-        List<MenuItem> all = menuItemRepository.findLiveByApplicationCode(ctx.applicationCode());
+        List<MenuItem> all = menuItemRepository.findLiveForTenant(ctx.applicationCode(), tenant.getId());
 
         Set<UUID> visible = all.stream()
                 .filter(m -> MenuVisibilityPolicy.evaluate(m, subject) == MenuVisibilityPolicy.Verdict.VISIBLE)

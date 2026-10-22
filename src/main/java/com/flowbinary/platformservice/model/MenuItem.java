@@ -8,6 +8,7 @@ import org.hibernate.annotations.Type;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -36,6 +37,11 @@ public class MenuItem extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "application_id", nullable = false)
     private Application application;
+
+    /** Null = platform-global item; set = owned by (and only visible to) that tenant. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "tenant_id")
+    private Tenant tenant;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")
@@ -116,7 +122,8 @@ public class MenuItem extends BaseEntity {
 
     @Type(JsonBinaryType.class)
     @Column(name = "metadata", columnDefinition = "jsonb")
-    private Map<String, Object> metadata;
+    @Builder.Default
+    private Map<String, Object> metadata = new HashMap<>();
 
     @Column(name = "created_by")
     private UUID createdBy;
