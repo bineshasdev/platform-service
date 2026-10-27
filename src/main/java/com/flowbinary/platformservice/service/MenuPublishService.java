@@ -34,6 +34,8 @@ public class MenuPublishService {
     private final MenuChangeApplier          applier;
     private final MenuHierarchyValidator     hierarchy;
     private final AuditService               audit;
+    private final MenuCatalogEvents          events;
+    private final MenuMetrics                metrics;
     private final PlatformTransactionManager transactionManager;
 
     @Transactional
@@ -92,6 +94,9 @@ public class MenuPublishService {
                 Map.of("version", current + 1, "changes", changes.size(), "changeSetId", draft.getId().toString()),
                 note, "API"));
 
+        events.changed(scope.application().getCode(), scope.tenantId());
+        metrics.count("menu.publish", "scope", scope.isGlobal() ? "global" : "tenant");
+
         return new PublishResponse(current + 1, changes.size(), snapshot.getId());
     }
 
@@ -144,6 +149,7 @@ public class MenuPublishService {
             case "item"     -> "MENU_ITEM";
             case "grants"   -> "MENU_ROLE_GRANT";
             case "override" -> "MENU_TENANT_OVERRIDE";
+            case "group"    -> "MENU_GROUP_ACCESS";
             default         -> "MENU_USER_ACCESS";
         };
     }

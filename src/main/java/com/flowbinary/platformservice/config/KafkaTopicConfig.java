@@ -18,6 +18,9 @@ public class KafkaTopicConfig {
     @Value("${app.kafka.topics.menu-events}")
     private String menuEventsTopic;
 
+    @Value("${app.kafka.topics.menu-catalog-events}")
+    private String menuCatalogEventsTopic;
+
     @Value("${app.kafka.topics.user-events}")
     private String userEventsTopic;
 
@@ -63,6 +66,22 @@ public class KafkaTopicConfig {
     public NewTopic menuEventsTopic() {
         return TopicBuilder.name(menuEventsTopic)
                 .partitions(2)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic menuCatalogEventsTopic() {
+        return TopicBuilder.name(menuCatalogEventsTopic)
+                .partitions(1)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic menuCatalogEventsDlqTopic() {
+        return TopicBuilder.name(menuCatalogEventsTopic + dlqSuffix)
+                .partitions(1)
                 .replicas(1)
                 .build();
     }

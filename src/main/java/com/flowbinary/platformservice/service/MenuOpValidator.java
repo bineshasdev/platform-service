@@ -29,10 +29,12 @@ public final class MenuOpValidator {
             case PUT_ITEM -> {
                 requireText(index, "label", op.label(), 100);
                 content(index, op);
+                tenantTypesScope(index, op, scope);
             }
             case PATCH_ITEM -> {
                 if (op.label() != null) requireText(index, "label", op.label(), 100);
                 content(index, op);
+                tenantTypesScope(index, op, scope);
             }
             case MOVE_ITEM -> {
                 if (op.parentCode() != null) requireCode(index, op.parentCode());
@@ -63,6 +65,15 @@ public final class MenuOpValidator {
                     throw new MenuDraftException(index, "effect must be GRANT, DENY or null to clear");
                 }
             }
+            case SET_GROUP_ACCESS -> {
+                if (scope.isGlobal()) {
+                    throw new MenuDraftException(index, "Groups belong to a tenant; assign them in a tenant scope");
+                }
+                requireCode(index, op.group());
+                if (op.effect() != null && !op.effect().equals("GRANT") && !op.effect().equals("DENY")) {
+                    throw new MenuDraftException(index, "effect must be GRANT, DENY or null to clear");
+                }
+            }
             case SET_OVERRIDE -> {
                 if (scope.isGlobal()) {
                     throw new MenuDraftException(index, "Overrides exist only in a tenant scope");
@@ -86,6 +97,10 @@ public final class MenuOpValidator {
         enumValue(index, "type", op.type(), MenuItemType.class);
         enumValue(index, "behavior", op.behavior(), MenuBehavior.class);
         enumValue(index, "target", op.target(), MenuTarget.class);
+        enumValue(index, "placement", op.placement(), MenuPlacement.class);
+        if (op.tenantTypes() != null) {
+            for (String t : op.tenantTypes()) enumValue(index, "tenantTypes", t, TenantType.class);
+        }
         if (op.plans() != null) {
             for (String p : op.plans()) enumValue(index, "plans", p, TenantPlan.class);
         }
@@ -97,6 +112,13 @@ public final class MenuOpValidator {
                         ? "EXTERNAL routes must be https:// URLs"
                         : "route must be an in-app path starting with a single '/'");
             }
+        }
+    }
+
+    /** A tenant's own item already applies to that one tenant; the gate belongs to global items. */
+    private static void tenantTypesScope(int index, MenuOp op, MenuScope scope) {
+        if (!scope.isGlobal() && op.tenantTypes() != null && !op.tenantTypes().isEmpty()) {
+            throw new MenuDraftException(index, "tenantTypes can only be set on global items");
         }
     }
 

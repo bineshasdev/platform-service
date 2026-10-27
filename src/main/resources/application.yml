@@ -233,6 +233,7 @@ app:
       tenant-events: platform.tenant.events
       feature-events: platform.feature.events
       menu-events: platform.menu.events
+      menu-catalog-events: platform.menu.catalog.events
       user-events: platform.user.events
       notification-events: platform.notification.events
       dlq-suffix: .DLT

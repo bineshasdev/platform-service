@@ -30,17 +30,6 @@ public class BootstrapService {
     private final MenuResolutionService        menuResolutionService;
     private final SettingsResolver             settingsResolver;
 
-    /** Settings-menu entries, each gated by the privilege that makes it usable. */
-    private static final List<SettingsEntry> SETTINGS_MENU = List.of(
-            new SettingsEntry("profile",  "Profile",         "/settings/profile",  null),
-            new SettingsEntry("tenant",   "Tenant Settings", "/settings/tenant",   null),
-            new SettingsEntry("users",    "Users & Roles",   "/settings/users",    "user.manage"),
-            new SettingsEntry("branding", "Branding",        "/settings/branding", "branding.manage"),
-            new SettingsEntry("audit",    "Audit Logs",      "/settings/audit",    "audit.view"));
-
-    private record SettingsEntry(String id, String label, String path, String requiredPrivilege) {
-    }
-
     // ── Feature codes that map to integrations ─────────────────────────────
     private static final Map<String, String> FEATURE_TO_INTEGRATION = Map.of(
         "erp_integration", "erp",
@@ -87,6 +76,9 @@ public class BootstrapService {
                 enabledFeatureCodes(planFeatures),
                 settings.getOrDefault("locale", "en"));
 
+        // One resolution feeds both: the settings hub is the SETTINGS-placed part of the same tree.
+        List<MenuEntry> menus = menuResolutionService.resolve(menuContext);
+
         // ── Build response ─────────────────────────────────────────────────
         return BootstrapResponse.builder()
                 .platform(buildPlatform())
@@ -96,8 +88,8 @@ public class BootstrapService {
                 .theme(buildTheme(settings))
                 .features(buildFeatures(planFeatures))
                 .subscription(buildSubscription(subscription, plan, planFeatures))
-                .menus(menuResolutionService.resolve(menuContext))
-                .settingsMenu(buildSettingsMenu(privileges))
+                .menus(menus)
+                .settingsMenu(MenuTreeBuilder.forPlacement(menus, MenuPlacement.SETTINGS.name()))
                 .notifications(NotificationsInfo.builder().unreadCount(0).build())
                 .integrations(buildIntegrations(planFeatures))
                 .environment(buildEnvironment())
@@ -242,23 +234,6 @@ public class BootstrapService {
                 .map(PlanFeature::getUsageLimit)
                 .findFirst()
                 .orElse(null);
-    }
-
-    // ── Settings menu ──────────────────────────────────────────────────────
-
-    /** Settings entries the caller's privileges unlock. */
-    private static List<MenuEntry> buildSettingsMenu(Set<String> privileges) {
-        boolean all = privileges.contains("*");
-        return SETTINGS_MENU.stream()
-                .filter(e -> e.requiredPrivilege() == null
-                        || all
-                        || privileges.contains(e.requiredPrivilege()))
-                .map(e -> MenuEntry.builder()
-                        .id(e.id())
-                        .label(e.label())
-                        .path(e.path())
-                        .build())
-                .toList();
     }
 
     // ── Integrations ───────────────────────────────────────────────────────

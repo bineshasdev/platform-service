@@ -11,6 +11,7 @@ import java.util.UUID;
 @Repository
 public interface MenuUserAccessRepository extends JpaRepository<MenuUserAccess, UUID> {
     List<MenuUserAccess> findByUserId(UUID userId);
+    List<MenuUserAccess> findByMenuItemIdIn(java.util.Collection<UUID> menuItemIds);
     Optional<MenuUserAccess> findByUserIdAndMenuItemId(UUID userId, UUID menuItemId);
 
     /** A tenant's user-level assignments within one application. */

@@ -39,6 +39,12 @@ public class MenuQueryService {
 
     @Transactional(readOnly = true)
     public List<MenuEntry> menuFor(Authentication authentication, String applicationCode) {
+        return menuFor(authentication, applicationCode, null);
+    }
+
+    /** The caller's menu; with {@code placement}, only the subtrees that render there. */
+    @Transactional(readOnly = true)
+    public List<MenuEntry> menuFor(Authentication authentication, String applicationCode, MenuPlacement placement) {
         Jwt jwt = ((JwtAuthenticationToken) authentication).getToken();
         Tenant tenant = tenantContextResolver.resolveRequired(authentication);
 
@@ -51,11 +57,12 @@ public class MenuQueryService {
 
         Map<String, String> settings = settingsResolver.merged(tenant.getId(), authUserId);
 
-        return menuResolutionService.resolve(new MenuResolutionService.MenuContext(
+        List<MenuEntry> tree = menuResolutionService.resolve(new MenuResolutionService.MenuContext(
                 tenant, user, applicationCode,
                 planContext.planCode(),
                 planContext.features(),
                 settings.getOrDefault("locale", "en")));
+        return placement == null ? tree : MenuTreeBuilder.forPlacement(tree, placement.name());
     }
 
     /** The plan code and enabled feature codes menu gating needs for a tenant. */

@@ -29,7 +29,13 @@ public class AuditService {
     private final AuditLogRepository auditLogRepository;
 
     public record Entry(UUID tenantId, UUID actorId, String action, String entityType, String entityId,
-                        Object before, Object after, String reason, String source) {
+                        Object before, Object after, String reason, String source,
+                        String actorType, java.util.Map<String, Object> metadata) {
+
+        public Entry(UUID tenantId, UUID actorId, String action, String entityType, String entityId,
+                     Object before, Object after, String reason, String source) {
+            this(tenantId, actorId, action, entityType, entityId, before, after, reason, source, null, null);
+        }
     }
 
     @Transactional
@@ -37,6 +43,7 @@ public class AuditService {
         auditLogRepository.save(AuditLog.builder()
                 .tenantId(e.tenantId())
                 .actorId(e.actorId())
+                .actorType(e.actorType() != null ? e.actorType() : e.actorId() == null ? "SYSTEM" : "USER")
                 .action(e.action())
                 .entityType(e.entityType())
                 .entityId(e.entityId())
@@ -45,6 +52,7 @@ public class AuditService {
                 .reason(e.reason())
                 .source(e.source() == null ? "API" : e.source())
                 .correlationId(correlationId())
+                .metadata(e.metadata() != null ? e.metadata() : new java.util.HashMap<>())
                 .build());
     }
 

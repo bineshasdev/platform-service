@@ -63,7 +63,7 @@ public class MenuPreviewService {
                         .filter(u -> u.getTenant().getId().equals(evalTenant.getId()))
                         .orElseThrow(() -> new NoSuchElementException("User not found"));
                 String locale = settings.merged(evalTenant.getId(), user.getAuthUserId()).getOrDefault("locale", "en");
-                return resolution.resolve(new MenuResolutionService.MenuContext(
+                return resolution.resolveUncached(new MenuResolutionService.MenuContext(
                         evalTenant, user, scope.application().getCode(), plan.planCode(), plan.features(), locale));
             }
             Role role = refs.assignableRole(new MenuScope(scope.application(), evalTenant), req.roleCode())

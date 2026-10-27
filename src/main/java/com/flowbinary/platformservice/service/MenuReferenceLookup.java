@@ -3,6 +3,7 @@ package com.flowbinary.platformservice.service;
 import com.flowbinary.platformservice.model.Privilege;
 import com.flowbinary.platformservice.model.Role;
 import com.flowbinary.platformservice.model.TenantUser;
+import com.flowbinary.platformservice.model.UserGroup;
 import com.flowbinary.platformservice.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -21,6 +22,8 @@ public class MenuReferenceLookup implements MenuReferences {
     private final FeatureRepository    featureRepository;
     private final TenantUserRepository tenantUserRepository;
     private final MenuItemRepository   menuItemRepository;
+    private final UserGroupRepository  userGroupRepository;
+    private final MenuModuleRepository menuModuleRepository;
 
     @Override
     public Optional<Role> assignableRole(MenuScope scope, String code) {
@@ -51,8 +54,24 @@ public class MenuReferenceLookup implements MenuReferences {
     }
 
     @Override
+    public Optional<UserGroup> group(MenuScope scope, String code) {
+        if (scope.isGlobal()) return Optional.empty();
+        return userGroupRepository
+                .findByTenantIdAndApplicationIdAndCode(scope.tenantId(), scope.application().getId(), code)
+                .filter(UserGroup::getIsActive);
+    }
+
+    @Override
     public boolean codeUsedByAnyTenant(UUID applicationId, String code) {
         return menuItemRepository.existsTenantOwnedCode(applicationId, code);
+    }
+
+    @Override
+    public Optional<String> moduleNamespaceOf(String code) {
+        int dot = code.indexOf('.');
+        if (dot <= 0) return Optional.empty();
+        String head = code.substring(0, dot);
+        return menuModuleRepository.existsByCode(head) ? Optional.of(head) : Optional.empty();
     }
 
     @Override

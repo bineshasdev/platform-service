@@ -16,7 +16,54 @@ class MenuTreeBuilderTest {
     private final Role role = role("DOCTOR");
 
     private List<MenuEntry> build(List<MenuItem> all, MenuItem... visible) {
-        return MenuTreeBuilder.build(all, ids(visible), Map.of(), "en");
+        return MenuTreeBuilder.build(all.stream().map(CatalogItem::of).toList(), ids(visible), Map.of(), "en");
+    }
+
+    // ── Placement ───────────────────────────────────────────────────────────
+
+    @Test
+    void entriesCarryTheirPlacement() {
+        MenuItem settings = open("settings", null, role);
+        MenuItem staff = open("settings.staff", settings, role);
+        staff.setPlacement(MenuPlacement.SETTINGS);
+        List<MenuEntry> tree = build(List.of(settings, staff), settings, staff);
+        assertThat(tree.get(0).getPlacement()).isEqualTo("LEFT");
+        assertThat(tree.get(0).getChildren().get(0).getPlacement()).isEqualTo("SETTINGS");
+    }
+
+    @Test
+    void forPlacementReturnsTheTopmostEntriesOfThatPlacementWithTheirChildren() {
+        MenuItem home = open("home", null, role);
+        MenuItem settings = open("settings", null, role);
+        MenuItem general = open("settings.general", settings, role);
+        general.setPlacement(MenuPlacement.SETTINGS);
+        general.setType(MenuItemType.GROUP);
+        MenuItem org = open("settings.organisation", general, role);
+        org.setPlacement(MenuPlacement.SETTINGS);
+        MenuItem quick = open("header.quick", null, role);
+        quick.setPlacement(MenuPlacement.HEADER);
+        MenuItem newPatient = open("quick.patient", quick, role);
+        newPatient.setPlacement(MenuPlacement.QUICK);
+
+        List<MenuItem> all = List.of(home, settings, general, org, quick, newPatient);
+        List<MenuEntry> tree = build(all, all.toArray(MenuItem[]::new));
+
+        assertThat(MenuTreeBuilder.forPlacement(tree, "LEFT")).extracting(MenuEntry::getId).containsExactly("home", "settings");
+        List<MenuEntry> hub = MenuTreeBuilder.forPlacement(tree, "SETTINGS");
+        assertThat(hub).extracting(MenuEntry::getId).containsExactly("settings.general");
+        assertThat(hub.get(0).getChildren()).extracting(MenuEntry::getId).containsExactly("settings.organisation");
+        assertThat(MenuTreeBuilder.forPlacement(tree, "QUICK")).extracting(MenuEntry::getId).containsExactly("quick.patient");
+        assertThat(MenuTreeBuilder.forPlacement(tree, "TILE")).isEmpty();
+    }
+
+    @Test
+    void forPlacementSeesPruningOfTheWholeTree() {
+        MenuItem settings = open("settings", null, role);
+        MenuItem staff = open("settings.staff", settings, role);
+        staff.setPlacement(MenuPlacement.SETTINGS);
+        // settings itself is hidden from the caller, so its pages are not reachable through the hub
+        List<MenuEntry> tree = build(List.of(settings, staff), staff);
+        assertThat(MenuTreeBuilder.forPlacement(tree, "SETTINGS")).isEmpty();
     }
 
     @Test
@@ -29,10 +76,27 @@ class MenuTreeBuilderTest {
     }
 
     @Test
-    void parentWithRouteButNoVisibleChildrenIsPruned() {
+    void parentWithRouteStaysWhenNoChildIsVisible() {
         MenuItem admin = open("admin", null, role);          // has its own route
         MenuItem users = open("users", admin, role);
-        assertThat(build(List.of(admin, users), admin)).isEmpty();   // child not visible to caller
+        assertThat(build(List.of(admin, users), admin)).extracting(MenuEntry::getId).containsExactly("admin");
+    }
+
+    @Test
+    void routelessParentWithNoVisibleChildIsPruned() {
+        MenuItem admin = open("admin", null, role);
+        admin.setRoute(null);
+        MenuItem users = open("users", admin, role);
+        assertThat(build(List.of(admin, users), admin)).isEmpty();
+    }
+
+    @Test
+    void childrenOutsideNavigationDoNotMakeAParentPrunable() {
+        MenuItem orders = open("orders", null, role);
+        MenuItem detail = open("orders.detail", orders, role);   // an inner screen: never in navigation
+        detail.setIsVisible(false);
+        detail.setPlacement(MenuPlacement.INNER);
+        assertThat(build(List.of(orders, detail), orders)).extracting(MenuEntry::getId).containsExactly("orders");
     }
 
     @Test
@@ -58,8 +122,8 @@ class MenuTreeBuilderTest {
 
     @Test
     void pruningCascadesUpThroughLevels() {
-        MenuItem a = open("a", null, role);
-        MenuItem b = open("b", a, role);
+        MenuItem a = open("a", null, role); a.setRoute(null);
+        MenuItem b = open("b", a, role); b.setRoute(null);
         MenuItem c = open("c", b, role);
         assertThat(build(List.of(a, b, c), a, b)).isEmpty();
         assertThat(build(List.of(a, b, c), a, b, c)).hasSize(1);
@@ -77,8 +141,8 @@ class MenuTreeBuilderTest {
     void tenantOverrideRelabelsAndReorders() {
         MenuItem a = open("a", null, role); a.setSortOrder(1);
         MenuItem b = open("b", null, role); b.setSortOrder(2);
-        MenuTenantOverride o = MenuTenantOverride.builder().menuItem(b).label("Bee").sortOrder(0).isHidden(false).build();
-        List<MenuEntry> tree = MenuTreeBuilder.build(List.of(a, b), ids(a, b), Map.of(b.getId(), o), "en");
+        CatalogOverride o = new CatalogOverride("Bee", null, 0, false);
+        List<MenuEntry> tree = MenuTreeBuilder.build(List.of(CatalogItem.of(a), CatalogItem.of(b)), ids(a, b), Map.of(b.getId(), o), "en");
         assertThat(tree).extracting(MenuEntry::getLabel).containsExactly("Bee", "a");
         assertThat(tree.get(0).getOrder()).isZero();
     }
@@ -97,7 +161,7 @@ class MenuTreeBuilderTest {
 
     @Test
     void parentHoldingOnlyDividersIsPruned() {
-        MenuItem p = open("p", null, role);
+        MenuItem p = open("p", null, role); p.setRoute(null);
         MenuItem d = open("d", p, role); d.setType(MenuItemType.DIVIDER); d.setRoute(null);
         assertThat(build(List.of(p, d), p, d)).isEmpty();
     }
@@ -113,5 +177,44 @@ class MenuTreeBuilderTest {
         assertThat(e.getTarget()).isEqualTo("SELF");
         assertThat(e.getSeparatorBefore()).isTrue();
         assertThat(e.getRoles()).containsExactly("DOCTOR");
+    }
+
+    private MenuItem temp(String code, MenuItem parent, int sort, int priority) {
+        MenuItem t = open(code, parent, role);
+        t.setSource(MenuSource.TEMPORARY);
+        t.setSortOrder(sort);
+        t.setPriority(priority);
+        t.setBadge("New");
+        t.setEndsAt(java.time.Instant.parse("2030-01-01T00:00:00Z"));
+        return t;
+    }
+
+    @Test
+    void leafParentSurvivesWhenItsOnlyChildIsATemporaryMenuTheCallerCannotSee() {
+        MenuItem parent = open("parent", null, role);
+        MenuItem campaign = temp("campaign", parent, 0, 0);
+        List<MenuEntry> tree = build(List.of(parent, campaign), parent);      // campaign not visible
+        assertThat(tree).extracting(MenuEntry::getId).containsExactly("parent");
+        assertThat(tree.get(0).getChildren()).isNull();
+    }
+
+    @Test
+    void permanentParentWithOnlyHiddenPermanentChildrenIsStillPrunedEvenIfATemporaryChildExists() {
+        MenuItem parent = open("parent", null, role); parent.setRoute(null);
+        MenuItem kid = open("kid", parent, role);
+        MenuItem campaign = temp("campaign", parent, 0, 0);
+        assertThat(build(List.of(parent, kid, campaign), parent)).isEmpty();
+    }
+
+    @Test
+    void temporaryEntriesCarryBadgeAndExpiryAndOrderByPriority() {
+        MenuItem low  = temp("low", null, 5, 1);
+        MenuItem high = temp("high", null, 5, 9);
+        MenuItem perm = open("perm", null, role); perm.setSortOrder(5);
+        List<MenuEntry> tree = build(List.of(low, high, perm), low, high, perm);
+        assertThat(tree).extracting(MenuEntry::getId).containsExactly("high", "low", "perm");
+        assertThat(tree.get(0).getBadge()).isEqualTo("New");
+        assertThat(tree.get(0).getExpiresAt()).isEqualTo(java.time.Instant.parse("2030-01-01T00:00:00Z"));
+        assertThat(tree.get(2).getExpiresAt()).isNull();
     }
 }

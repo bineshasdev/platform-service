@@ -3,6 +3,7 @@ package com.flowbinary.platformservice.service;
 import com.flowbinary.platformservice.model.Privilege;
 import com.flowbinary.platformservice.model.Role;
 import com.flowbinary.platformservice.model.TenantUser;
+import com.flowbinary.platformservice.model.UserGroup;
 
 import java.util.Collection;
 import java.util.Optional;
@@ -24,8 +25,17 @@ public interface MenuReferences {
     /** The user, only if they belong to {@code tenantId}. */
     Optional<TenantUser> tenantUser(UUID tenantId, UUID userId);
 
+    /** An active group of the scope's tenant and application. */
+    Optional<UserGroup> group(MenuScope scope, String code);
+
     /** True when some tenant already owns an item with this code in the application. */
     boolean codeUsedByAnyTenant(UUID applicationId, String code);
+
+    /**
+     * The registered module (any status: a code stays reserved after deregistration) whose
+     * namespace {@code code} falls in — {@code crm.leads} is in module {@code crm}'s.
+     */
+    Optional<String> moduleNamespaceOf(String code);
 
     /** True when any of the given items has a tenant-owned child. */
     boolean hasTenantOwnedChildren(Collection<UUID> parentIds);

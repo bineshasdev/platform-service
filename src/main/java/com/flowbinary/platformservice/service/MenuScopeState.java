@@ -12,9 +12,11 @@ import java.util.stream.Collectors;
  *
  * <pre>
  *   item:&lt;code&gt;              an item the scope owns, with its roles and plans
+ *   moditem:&lt;code&gt;          a module item's admin-controlled part (enabled, sortOrder); global scope only
  *   grants:&lt;code&gt;            roles of this tenant granted on a platform item
  *   override:&lt;code&gt;          tenant relabel/reorder/hide of a platform item
  *   user:&lt;code&gt;:&lt;userId&gt;    one user's GRANT/DENY on an item
+ *   group:&lt;code&gt;:&lt;group&gt;    one group's GRANT/DENY on an item
  * </pre>
  * Values are plain maps/lists/strings so they round-trip through jsonb and
  * compare with {@code equals}.
@@ -34,12 +36,22 @@ public final class MenuScopeState {
     public static Map<String, Object> capture(MenuScope scope,
                                               Collection<MenuItem> items,
                                               Collection<MenuTenantOverride> overrides,
-                                              Collection<MenuUserAccess> userAccess) {
+                                              Collection<MenuUserAccess> userAccess,
+                                              Collection<MenuGroupAccess> groupAccess) {
         Map<String, Object> state = new TreeMap<>();
         UUID tenantId = scope.tenantId();
 
         for (MenuItem m : items) {
-            if (m.getDeletedAt() != null) continue;
+            if (m.getDeletedAt() != null || m.isTemporary()) continue;   // temporary menus are not drafted
+            if (m.isModule()) {                                           // content is the module's; admins own hide + order
+                if (scope.isGlobal()) {
+                    Map<String, Object> a = new LinkedHashMap<>();
+                    a.put("enabled", Boolean.TRUE.equals(m.getIsActive()));
+                    a.put("sortOrder", m.getSortOrder());
+                    state.put("moditem:" + m.getCode(), a);
+                }
+                continue;
+            }
             UUID owner = m.getTenant() == null ? null : m.getTenant().getId();
             if (Objects.equals(owner, tenantId)) {
                 state.put("item:" + m.getCode(), itemAtom(m));
@@ -52,6 +64,7 @@ public final class MenuScopeState {
             }
         }
         for (MenuTenantOverride o : overrides) {
+            if (o.getMenuItem().isTemporary()) continue;
             Map<String, Object> atom = new LinkedHashMap<>();
             atom.put("label", o.getLabel());
             atom.put("icon", o.getIcon());
@@ -60,11 +73,19 @@ public final class MenuScopeState {
             state.put("override:" + o.getMenuItem().getCode(), atom);
         }
         for (MenuUserAccess a : userAccess) {
+            if (a.getMenuItem().isTemporary()) continue;
             Map<String, Object> atom = new LinkedHashMap<>();
             atom.put("effect", a.getEffect().name());
             atom.put("reason", a.getReason());
             atom.put("validTo", a.getValidTo() == null ? null : a.getValidTo().toString());
             state.put("user:" + a.getMenuItem().getCode() + ":" + a.getUser().getId(), atom);
+        }
+        for (MenuGroupAccess a : groupAccess) {
+            if (a.getMenuItem().isTemporary()) continue;
+            Map<String, Object> atom = new LinkedHashMap<>();
+            atom.put("effect", a.getEffect().name());
+            atom.put("reason", a.getReason());
+            state.put("group:" + a.getMenuItem().getCode() + ":" + a.getGroup().getCode(), atom);
         }
         return state;
     }
@@ -79,6 +100,7 @@ public final class MenuScopeState {
         a.put("type", m.getType().name());
         a.put("behavior", m.getBehavior().name());
         a.put("target", m.getTarget().name());
+        a.put("placement", m.getPlacement().name());
         a.put("separatorBefore", Boolean.TRUE.equals(m.getSeparatorBefore()));
         a.put("visible", Boolean.TRUE.equals(m.getIsVisible()));
         a.put("enabled", Boolean.TRUE.equals(m.getIsActive()));
@@ -86,6 +108,7 @@ public final class MenuScopeState {
         a.put("requiredPrivilege", m.getRequiredPrivilege() == null ? null : m.getRequiredPrivilege().getCode());
         a.put("requiredFeature", m.getRequiredFeature());
         a.put("plans", m.getPlanAccess().stream().map(p -> p.getId().getPlan().name()).sorted().toList());
+        a.put("tenantTypes", m.getTenantTypes() == null ? null : m.getTenantTypes().stream().sorted().toList());
         a.put("roles", m.getRoleAccess().stream().map(r -> r.getRole().getCode()).sorted().toList());
         return a;
     }
@@ -146,7 +169,12 @@ public final class MenuScopeState {
         for (Change c : changes) {
             String k = c.key();
             Map<String, Object> a = c.after();
-            if (k.startsWith("grants:")) {
+            if (k.startsWith("moditem:")) {
+                if (c.kind() == Kind.UPDATE) {         // a module item that came or went is the module's doing, not a draft's
+                    rest.add(MenuOp.builder().op(MenuOpType.PATCH_ITEM).code(k.substring(8))
+                            .enabled((Boolean) a.get("enabled")).sortOrder(number(a.get("sortOrder"))).build());
+                }
+            } else if (k.startsWith("grants:")) {
                 List<String> roles = a == null ? List.of() : (List<String>) a.get("roles");
                 rest.add(MenuOp.builder().op(MenuOpType.SET_ROLES).code(k.substring(7))
                         .roles(new TreeSet<>(roles)).build());
@@ -156,6 +184,12 @@ public final class MenuScopeState {
                         .icon(a == null ? null : (String) a.get("icon"))
                         .sortOrder(a == null ? null : number(a.get("sortOrder")))
                         .hidden(a != null && Boolean.TRUE.equals(a.get("hidden")))
+                        .build());
+            } else if (k.startsWith("group:")) {
+                String[] p = k.split(":", 3);
+                rest.add(MenuOp.builder().op(MenuOpType.SET_GROUP_ACCESS).code(p[1]).group(p[2])
+                        .effect(a == null ? null : (String) a.get("effect"))
+                        .reason(a == null ? null : (String) a.get("reason"))
                         .build());
             } else if (k.startsWith("user:")) {
                 String[] p = k.split(":", 3);
@@ -180,6 +214,8 @@ public final class MenuScopeState {
                 .label((String) a.get("label")).description((String) a.get("description"))
                 .icon((String) a.get("icon")).route((String) a.get("route"))
                 .type((String) a.get("type")).behavior((String) a.get("behavior")).target((String) a.get("target"))
+                .placement((String) a.get("placement"))
+                .tenantTypes(a.get("tenantTypes") == null ? Set.of() : new TreeSet<>((List<String>) a.get("tenantTypes")))
                 .separatorBefore((Boolean) a.get("separatorBefore")).visible((Boolean) a.get("visible"))
                 .enabled((Boolean) a.get("enabled"))
                 .requiredPrivilege((String) a.get("requiredPrivilege")).requiredFeature((String) a.get("requiredFeature"))

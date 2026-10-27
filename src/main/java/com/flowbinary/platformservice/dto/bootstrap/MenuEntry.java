@@ -25,6 +25,8 @@ public class MenuEntry {
     private String       behavior;
     /** SELF | BLANK. */
     private String       target;
+    /** LEFT | HEADER | QUICK | USER | SETTINGS | TAB | INNER | TILE — where the entry renders. */
+    private String       placement;
     /** Effective sort order among siblings (tenant override applied). */
     private Integer      order;
     /** Render a divider above this entry. Only set when true. */

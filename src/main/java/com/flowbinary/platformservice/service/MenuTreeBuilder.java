@@ -1,9 +1,7 @@
 package com.flowbinary.platformservice.service;
 
 import com.flowbinary.platformservice.dto.bootstrap.MenuEntry;
-import com.flowbinary.platformservice.model.MenuItem;
 import com.flowbinary.platformservice.model.MenuItemType;
-import com.flowbinary.platformservice.model.MenuTenantOverride;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -13,38 +11,41 @@ import java.util.stream.Collectors;
  *
  * <ul>
  *   <li>Children of a hidden parent are dropped — the tree grows from visible roots.</li>
- *   <li>A parent that has children in the catalogue but none left for this caller is
- *       pruned, even if it has a route of its own. A leaf is never pruned for that reason.</li>
- *   <li>A childless {@code GROUP} with no route is pruned.</li>
+ *   <li>An item with a route of its own is a destination and stays, whether or not any of its
+ *       sub-items are visible to this caller.</li>
+ *   <li>A routeless item (a group) with nothing visible below it is pruned: it would be an empty
+ *       heading. Temporary children and children outside navigation ({@code is_visible = false}:
+ *       tabs, inner screens) never count as something below it.</li>
  *   <li>Dividers are collapsed: none leading, trailing or adjacent, and a parent holding
  *       only dividers counts as empty.</li>
  * </ul>
  */
 final class MenuTreeBuilder {
 
-    private final Map<UUID, List<MenuItem>>       childrenByParent;
+    private final Map<UUID, List<CatalogItem>>   childrenByParent;
     private final Set<UUID>                       visible;
-    private final Map<UUID, MenuTenantOverride>   overrides;
+    private final Map<UUID, CatalogOverride>     overrides;
     private final String                          locale;
-    private final Comparator<MenuItem>            byOrder;
+    private final Comparator<CatalogItem>        byOrder;
 
-    private MenuTreeBuilder(List<MenuItem> all, Set<UUID> visible,
-                            Map<UUID, MenuTenantOverride> overrides, String locale) {
+    private MenuTreeBuilder(List<CatalogItem> all, Set<UUID> visible,
+                            Map<UUID, CatalogOverride> overrides, String locale) {
         this.childrenByParent = all.stream()
-                .filter(m -> m.getParent() != null)
-                .collect(Collectors.groupingBy(m -> m.getParent().getId()));
+                .filter(m -> m.parentId() != null)
+                .collect(Collectors.groupingBy(CatalogItem::parentId));
         this.visible   = visible;
         this.overrides = overrides;
         this.locale    = locale;
-        this.byOrder   = Comparator.<MenuItem>comparingInt(this::effectiveSortOrder)
-                .thenComparing(MenuItem::getCode);
+        this.byOrder   = Comparator.<CatalogItem>comparingInt(this::effectiveSortOrder)
+                .thenComparing(Comparator.comparingInt(CatalogItem::priority).reversed())
+                .thenComparing(CatalogItem::code);
     }
 
-    static List<MenuEntry> build(List<MenuItem> all, Set<UUID> visible,
-                                 Map<UUID, MenuTenantOverride> overrides, String locale) {
+    static List<MenuEntry> build(List<CatalogItem> all, Set<UUID> visible,
+                                 Map<UUID, CatalogOverride> overrides, String locale) {
         MenuTreeBuilder b = new MenuTreeBuilder(all, visible, overrides, locale);
         List<MenuEntry> roots = all.stream()
-                .filter(m -> m.getParent() == null && visible.contains(m.getId()))
+                .filter(m -> m.parentId() == null && visible.contains(m.id()))
                 .sorted(b.byOrder)
                 .map(b::toEntry)
                 .filter(Objects::nonNull)
@@ -52,45 +53,66 @@ final class MenuTreeBuilder {
         return tidyDividers(roots);
     }
 
-    private MenuEntry toEntry(MenuItem item) {
-        List<MenuItem> defined = childrenByParent.getOrDefault(item.getId(), List.of());
+    private MenuEntry toEntry(CatalogItem item) {
+        List<CatalogItem> defined = childrenByParent.getOrDefault(item.id(), List.of());
 
         List<MenuEntry> children = tidyDividers(defined.stream()
-                .filter(c -> visible.contains(c.getId()))
+                .filter(c -> visible.contains(c.id()))
                 .sorted(byOrder)
                 .map(this::toEntry)
                 .filter(Objects::nonNull)
                 .toList());
 
-        boolean hasChildren = !defined.isEmpty();
-        if (hasChildren && children.isEmpty()) return null;
-        if (!hasChildren && item.getType() == MenuItemType.GROUP && item.getRoute() == null) return null;
+        if (item.route() == null && children.isEmpty()) {
+            boolean hasChildren = defined.stream().anyMatch(c -> !c.temporary() && c.visible());
+            if (hasChildren || item.type() == MenuItemType.GROUP) return null;
+        }
 
-        MenuTenantOverride override = overrides.get(item.getId());
-        String label = override != null && override.getLabel() != null
-                ? override.getLabel() : item.labelFor(locale);
-        String icon = override != null && override.getIcon() != null
-                ? override.getIcon() : item.getIcon();
+        CatalogOverride override = overrides.get(item.id());
+        String label = override != null && override.label() != null
+                ? override.label() : item.labelFor(locale);
+        String icon = override != null && override.icon() != null
+                ? override.icon() : item.icon();
 
-        List<String> roleCodes = item.getRoleAccess().stream()
-                .map(ra -> ra.getRole().getCode())
-                .sorted()
-                .toList();
+        List<String> roleCodes = item.roleCodes().stream().sorted().toList();
 
         return MenuEntry.builder()
-                .id(item.getCode())
+                .id(item.code())
                 .label(label)
                 .icon(icon)
-                .path(item.getRoute())
+                .path(item.route())
                 .roles(roleCodes.isEmpty() ? null : roleCodes)
-                .feature(item.getRequiredFeature())
-                .type(item.getType().name())
-                .behavior(item.getBehavior().name())
-                .target(item.getTarget().name())
+                .feature(item.requiredFeature())
+                .type(item.type().name())
+                .behavior(item.behavior().name())
+                .target(item.target().name())
+                .placement(item.placement().name())
                 .order(effectiveSortOrder(item))
-                .separatorBefore(Boolean.TRUE.equals(item.getSeparatorBefore()) ? Boolean.TRUE : null)
+                .separatorBefore(item.separatorBefore() ? Boolean.TRUE : null)
+                .badge(item.badge())
+                .expiresAt(item.temporary() ? item.endsAt() : null)
                 .children(children.isEmpty() ? null : children)
                 .build();
+    }
+
+    /**
+     * The subtrees of one placement, taken from a resolved tree: every entry of that
+     * placement whose parent is of another placement (or which is a root), with its
+     * children as resolved. Pruning has already run on the whole tree, so a settings
+     * page is only returned while the settings hub that holds it is visible.
+     */
+    static List<MenuEntry> forPlacement(List<MenuEntry> tree, String placement) {
+        List<MenuEntry> out = new ArrayList<>();
+        collect(tree, placement, out);
+        return tidyDividers(out);
+    }
+
+    private static void collect(List<MenuEntry> entries, String placement, List<MenuEntry> out) {
+        if (entries == null) return;
+        for (MenuEntry e : entries) {
+            if (placement.equals(e.getPlacement())) out.add(e);
+            else collect(e.getChildren(), placement, out);
+        }
     }
 
     /** Drops leading, trailing and consecutive dividers. */
@@ -108,8 +130,8 @@ final class MenuTreeBuilder {
         return MenuItemType.DIVIDER.name().equals(e.getType());
     }
 
-    private int effectiveSortOrder(MenuItem item) {
-        MenuTenantOverride o = overrides.get(item.getId());
-        return o != null && o.getSortOrder() != null ? o.getSortOrder() : item.getSortOrder();
+    private int effectiveSortOrder(CatalogItem item) {
+        CatalogOverride o = overrides.get(item.id());
+        return o != null && o.sortOrder() != null ? o.sortOrder() : item.sortOrder();
     }
 }

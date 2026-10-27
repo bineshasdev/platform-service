@@ -79,4 +79,67 @@ class MenuScopeStateTest {
         assertThat(clear.userId()).isEqualTo(user);
         assertThat(Kind.values()).hasSize(3);
     }
+
+    @Test
+    void placementAndTenantTypesAreCapturedAndRestored() {
+        var app = com.flowbinary.platformservice.model.Application.builder().code("A").name("A").build();
+        app.setId(UUID.randomUUID());
+        var item = MenuTestFixtures.item("lab.worklist", null);
+        item.setPlacement(com.flowbinary.platformservice.model.MenuPlacement.TAB);
+        item.setTenantTypes(List.of("LAB"));
+
+        var state = MenuScopeState.capture(new MenuScope(app, null), List.of(item), List.of(), List.of(), List.of());
+        @SuppressWarnings("unchecked") Map<String, Object> atom = (Map<String, Object>) state.get("item:lab.worklist");
+        assertThat(atom).containsEntry("placement", "TAB").containsEntry("tenantTypes", List.of("LAB"));
+
+        MenuOp put = MenuScopeState.opsToReach(Map.of(), state).get(0);
+        assertThat(put.placement()).isEqualTo("TAB");
+        assertThat(put.tenantTypes()).containsExactly("LAB");
+    }
+
+    @Test
+    void aSnapshotFromBeforePlacementRestoresTheDefaults() {
+        // snapshots published before V25 have neither key
+        MenuOp put = MenuScopeState.opsToReach(Map.of(), Map.of("item:a", item(null, "A", 1))).get(0);
+        assertThat(put.placement()).isNull();          // PUT_ITEM then defaults to LEFT
+        assertThat(put.tenantTypes()).isEmpty();       // every tenant type
+    }
+
+    @Test
+    void aModuleItemContributesOnlyItsAdminControlledPartAndOnlyToTheGlobalScope() {
+        var app = com.flowbinary.platformservice.model.Application.builder().code("A").name("A").build();
+        app.setId(UUID.randomUUID());
+        var item = MenuTestFixtures.item("billing.inv", null);
+        item.setSource(com.flowbinary.platformservice.model.MenuSource.MODULE);
+        item.setIsActive(false);
+        item.setSortOrder(42);
+        var tenant = com.flowbinary.platformservice.model.Tenant.builder().build();
+        tenant.setId(UUID.randomUUID());
+
+        var global = MenuScopeState.capture(new MenuScope(app, null), List.of(item), List.of(), List.of(), List.of());
+        assertThat(global).containsOnlyKeys("moditem:billing.inv");
+        @SuppressWarnings("unchecked") Map<String, Object> atom = (Map<String, Object>) global.get("moditem:billing.inv");
+        assertThat(atom).containsEntry("enabled", false).containsEntry("sortOrder", 42);
+
+        assertThat(MenuScopeState.capture(new MenuScope(app, tenant), List.of(item), List.of(), List.of(), List.of())).isEmpty();
+    }
+
+    @Test
+    void rollbackRestoresHideAndOrderOfModuleItemsButIgnoresItemsTheModuleAddedOrDropped() {
+        Map<String, Object> was = new TreeMap<>();
+        was.put("moditem:billing.a", new LinkedHashMap<>(Map.of("enabled", true, "sortOrder", 5)));
+        was.put("moditem:billing.dropped", new LinkedHashMap<>(Map.of("enabled", true, "sortOrder", 1)));
+        Map<String, Object> now = new TreeMap<>();
+        now.put("moditem:billing.a", new LinkedHashMap<>(Map.of("enabled", false, "sortOrder", 9)));
+        now.put("moditem:billing.added", new LinkedHashMap<>(Map.of("enabled", true, "sortOrder", 2)));
+
+        List<MenuOp> ops = MenuScopeState.opsToReach(now, was);
+
+        assertThat(ops).hasSize(1);
+        MenuOp op = ops.get(0);
+        assertThat(op.op()).isEqualTo(MenuOpType.PATCH_ITEM);
+        assertThat(op.code()).isEqualTo("billing.a");
+        assertThat(op.enabled()).isTrue();
+        assertThat(op.sortOrder()).isEqualTo(5);
+    }
 }

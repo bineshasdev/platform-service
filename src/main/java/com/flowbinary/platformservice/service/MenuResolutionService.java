@@ -29,12 +29,13 @@ public class MenuResolutionService {
     /** Application a caller resolves against when it does not name one. */
     public static final String DEFAULT_APPLICATION = "PROVIDER_CONSOLE";
 
-    private final MenuItemRepository            menuItemRepository;
     private final MenuUserAccessRepository      menuUserAccessRepository;
-    private final MenuTenantOverrideRepository  menuTenantOverrideRepository;
     private final UserRoleAssignmentRepository  userRoleAssignmentRepository;
     private final RolePrivilegeRepository       rolePrivilegeRepository;
     private final RoleRepository                roleRepository;
+    private final UserGroupMemberRepository     userGroupMemberRepository;
+    private final MenuCatalogueCache            catalogueCache;
+    private final MenuMetrics                   metrics;
 
     /** Everything the resolver needs that it cannot look up itself. */
     public record MenuContext(Tenant tenant,
@@ -94,8 +95,27 @@ public class MenuResolutionService {
 
     // ── Menu resolution ────────────────────────────────────────────────────
 
+    /**
+     * The caller's menu. The shared catalogue comes from the version-keyed cache;
+     * everything that depends on <em>who</em> is asking (roles, privileges, user
+     * overrides, group membership) is read per request.
+     */
     @Transactional(readOnly = true)
     public List<MenuEntry> resolve(MenuContext ctx) {
+        return metrics.observe("menu.resolve", () -> resolve(ctx, catalogueCache.get(ctx.applicationCode(), ctx.tenant().getId())),
+                "application", ctx.applicationCode());
+    }
+
+    /**
+     * Like {@link #resolve} but reads the catalogue straight from the database,
+     * so it sees changes made earlier in the current transaction. Admin preview only.
+     */
+    @Transactional(readOnly = true)
+    public List<MenuEntry> resolveUncached(MenuContext ctx) {
+        return resolve(ctx, catalogueCache.compileFresh(ctx.applicationCode(), ctx.tenant().getId()));
+    }
+
+    private List<MenuEntry> resolve(MenuContext ctx, MenuCatalogue catalogue) {
         Set<UUID> roleIds = effectiveRoles(ctx.user()).stream()
                 .map(Role::getId)
                 .collect(Collectors.toSet());
@@ -108,48 +128,58 @@ public class MenuResolutionService {
                                           MenuUserAccess::getEffect,
                                           (a, b) -> b));
 
-        return resolveFor(ctx.tenant(), roleIds, ctx.user().getRole() == PlatformRole.SUPERADMIN,
-                userOverrides, ctx);
+        Set<UUID> groupIds = userGroupMemberRepository
+                .findActiveGroupIds(ctx.user().getId(), ctx.applicationCode());
+
+        return resolveFor(catalogue, roleIds, ctx.user().getRole() == PlatformRole.SUPERADMIN,
+                userOverrides, groupIds, ctx);
     }
 
     /**
      * The menu a holder of one role would see, with no user-level overrides.
-     * Used by the admin preview; inherited parent roles are folded in.
+     * Used by the admin preview (always uncached); inherited parent roles are folded in.
      */
     @Transactional(readOnly = true)
     public List<MenuEntry> resolveForRole(Role role, MenuContext ctx) {
         Set<UUID> roleIds = expandInherited(List.of(role)).stream()
                 .map(Role::getId)
                 .collect(Collectors.toSet());
-        return resolveFor(ctx.tenant(), roleIds, false, Map.of(), ctx);
+        return resolveFor(catalogueCache.compileFresh(ctx.applicationCode(), ctx.tenant().getId()),
+                roleIds, false, Map.of(), Set.of(), ctx);
     }
 
-    private List<MenuEntry> resolveFor(Tenant tenant, Set<UUID> roleIds, boolean allPrivileges,
-                                       Map<UUID, MenuAccessEffect> userOverrides, MenuContext ctx) {
+    private List<MenuEntry> resolveFor(MenuCatalogue catalogue, Set<UUID> roleIds, boolean allPrivileges,
+                                       Map<UUID, MenuAccessEffect> userOverrides, Set<UUID> groupIds,
+                                       MenuContext ctx) {
         Set<String> privileges = roleIds.isEmpty()
                 ? Set.of()
                 : rolePrivilegeRepository.findPrivilegeCodesByRoleIds(roleIds);
 
-        Map<UUID, MenuTenantOverride> tenantOverrides = menuTenantOverrideRepository
-                .findByTenantId(tenant.getId()).stream()
-                .collect(Collectors.toMap(o -> o.getMenuItem().getId(), o -> o, (a, b) -> b));
+        Set<UUID> groupDenied = new HashSet<>();
+        Set<UUID> groupGranted = new HashSet<>();
+        for (UUID g : groupIds) {
+            groupDenied.addAll(catalogue.groupDenied().getOrDefault(g, Set.of()));
+            groupGranted.addAll(catalogue.groupGranted().getOrDefault(g, Set.of()));
+        }
 
         MenuVisibilityPolicy.Subject subject = new MenuVisibilityPolicy.Subject(
                 roleIds,
                 privileges,
                 allPrivileges,
+                ctx.tenant().getType() == null ? null : ctx.tenant().getType().name(),
                 ctx.planCode(),
                 ctx.enabledFeatures(),
                 userOverrides,
-                tenantOverrides);
+                catalogue.overrides(),
+                groupDenied,
+                groupGranted,
+                Instant.now());
 
-        List<MenuItem> all = menuItemRepository.findLiveForTenant(ctx.applicationCode(), tenant.getId());
-
-        Set<UUID> visible = all.stream()
+        Set<UUID> visible = catalogue.items().stream()
                 .filter(m -> MenuVisibilityPolicy.evaluate(m, subject) == MenuVisibilityPolicy.Verdict.VISIBLE)
-                .map(MenuItem::getId)
+                .map(CatalogItem::id)
                 .collect(Collectors.toSet());
 
-        return MenuTreeBuilder.build(all, visible, tenantOverrides, ctx.locale());
+        return MenuTreeBuilder.build(catalogue.items(), visible, catalogue.overrides(), ctx.locale());
     }
 }

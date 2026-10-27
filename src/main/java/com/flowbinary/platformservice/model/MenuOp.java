@@ -34,15 +34,21 @@ public record MenuOp(
         String       type,
         String       behavior,
         String       target,
+        /** {@link MenuPlacement} name; PUT defaults to LEFT. */
+        String       placement,
         Boolean      separatorBefore,
         Boolean      visible,
         Boolean      enabled,
         String       requiredPrivilege,
         String       requiredFeature,
         Set<String>  plans,
+        /** {@link TenantType} names; global items only. PUT: null or empty = every type. PATCH: empty clears the gate. */
+        Set<String>  tenantTypes,
         // assignment
         Set<String>  roles,
         UUID         userId,
+        /** SET_GROUP_ACCESS: the tenant's group code. */
+        String       group,
         String       effect,
         String       reason,
         Instant      validTo,

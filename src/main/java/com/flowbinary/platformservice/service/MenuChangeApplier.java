@@ -37,16 +37,19 @@ public class MenuChangeApplier {
         public final List<MenuItem> items;
         public final List<MenuTenantOverride> overrides;
         public final List<MenuUserAccess> userAccess;
+        public final List<MenuGroupAccess> groupAccess;
         public final List<Object> created = new ArrayList<>();
         public final List<Object> removed = new ArrayList<>();
 
         public Workspace(MenuScope scope, UUID actorId, List<MenuItem> items,
-                         List<MenuTenantOverride> overrides, List<MenuUserAccess> userAccess) {
+                         List<MenuTenantOverride> overrides, List<MenuUserAccess> userAccess,
+                         List<MenuGroupAccess> groupAccess) {
             this.scope = scope;
             this.actorId = actorId;
             this.items = new ArrayList<>(items);
             this.overrides = new ArrayList<>(overrides);
             this.userAccess = new ArrayList<>(userAccess);
+            this.groupAccess = new ArrayList<>(groupAccess);
         }
 
         List<MenuItem> live() {
@@ -84,6 +87,7 @@ public class MenuChangeApplier {
             case DELETE_ITEM     -> deleteItem(ws, i, op);
             case SET_ROLES       -> setRoles(ws, i, requireLive(ws, i, op.code()), op.roles());
             case SET_USER_ACCESS -> setUserAccess(ws, i, op);
+            case SET_GROUP_ACCESS -> setGroupAccess(ws, i, op);
             case SET_OVERRIDE    -> setOverride(ws, i, op);
         }
     }
@@ -94,10 +98,16 @@ public class MenuChangeApplier {
         MenuItem item = findAny(ws, op.code());
         boolean isNew = item == null;
 
+        if (!isNew && item.isTemporary()) {
+            throw new MenuDraftException(i, "Code '" + op.code() + "' belongs to a temporary menu");
+        }
         if (isNew) {
             if (ws.scope.isGlobal() && refs.codeUsedByAnyTenant(ws.scope.application().getId(), op.code())) {
                 throw new MenuDraftException(i, "Code '" + op.code() + "' is already used by a tenant-owned item");
             }
+            refs.moduleNamespaceOf(op.code()).ifPresent(m -> {
+                throw new MenuDraftException(i, "Code '" + op.code() + "' is in the namespace of module '" + m + "'");
+            });
             item = MenuItem.builder()
                     .application(ws.scope.application())
                     .tenant(ws.scope.tenant())
@@ -120,6 +130,8 @@ public class MenuChangeApplier {
         item.setTarget(op.target() == null ? MenuTarget.SELF : MenuTarget.valueOf(op.target()));
         item.setBehavior(op.behavior() != null ? MenuBehavior.valueOf(op.behavior())
                 : item.getType() == MenuItemType.GROUP ? MenuBehavior.EXPAND : MenuBehavior.NAVIGATE);
+        item.setPlacement(op.placement() == null ? MenuPlacement.LEFT : MenuPlacement.valueOf(op.placement()));
+        item.setTenantTypes(tenantTypesOrNull(op.tenantTypes()));
         item.setSeparatorBefore(op.separatorBefore() != null && op.separatorBefore());
         item.setIsVisible(op.visible() == null || op.visible());
         item.setIsActive(op.enabled() == null || op.enabled());
@@ -137,7 +149,19 @@ public class MenuChangeApplier {
 
     private void patchItem(Workspace ws, int i, MenuOp op) {
         if (op.parentCode() != null) throw new MenuDraftException(i, "Use MOVE_ITEM to change the parent");
-        MenuItem item = requireOwned(ws, i, requireLive(ws, i, op.code()));
+        MenuItem found = requireLive(ws, i, op.code());
+        if (found.isModule()) {                     // hide and re-order are the only things an administrator may change
+            boolean other = op.label() != null || op.description() != null || op.icon() != null || op.route() != null
+                    || op.type() != null || op.behavior() != null || op.target() != null || op.separatorBefore() != null
+                    || op.placement() != null || op.tenantTypes() != null
+                    || op.visible() != null || op.requiredPrivilege() != null || op.requiredFeature() != null;
+            if (other) throw moduleItem(i, found);
+            if (op.enabled() != null) found.setIsActive(op.enabled());
+            if (op.sortOrder() != null) found.setSortOrder(op.sortOrder());
+            found.setUpdatedBy(ws.actorId);
+            return;
+        }
+        MenuItem item = requireOwned(ws, i, found);
 
         if (op.label() != null)           item.setLabel(op.label());
         if (op.description() != null)     item.setDescription(op.description());
@@ -147,12 +171,19 @@ public class MenuChangeApplier {
         if (op.behavior() != null)        item.setBehavior(MenuBehavior.valueOf(op.behavior()));
         if (op.target() != null)          item.setTarget(MenuTarget.valueOf(op.target()));
         if (op.separatorBefore() != null) item.setSeparatorBefore(op.separatorBefore());
+        if (op.placement() != null)       item.setPlacement(MenuPlacement.valueOf(op.placement()));
+        if (op.tenantTypes() != null)     item.setTenantTypes(tenantTypesOrNull(op.tenantTypes()));
         if (op.visible() != null)         item.setIsVisible(op.visible());
         if (op.enabled() != null)         item.setIsActive(op.enabled());
         if (op.sortOrder() != null)       item.setSortOrder(op.sortOrder());
         if (op.requiredPrivilege() != null) item.setRequiredPrivilege(privilegeOrNull(i, op.requiredPrivilege()));
         if (op.requiredFeature() != null)   item.setRequiredFeature(featureOrNull(i, op.requiredFeature()));
         item.setUpdatedBy(ws.actorId);
+    }
+
+    /** Empty means "every type", which the column stores as NULL. */
+    private static List<String> tenantTypesOrNull(Set<String> types) {
+        return types == null || types.isEmpty() ? null : new ArrayList<>(new TreeSet<>(types));
     }
 
     private void moveItem(Workspace ws, int i, MenuOp op) {
@@ -220,6 +251,10 @@ public class MenuChangeApplier {
     // ── Assignments ────────────────────────────────────────────────────────
 
     private void setRoles(Workspace ws, int i, MenuItem item, Set<String> codes) {
+        if (item.isModule()) {
+            throw new MenuDraftException(i, "'" + item.getCode() + "' is gated by the privilege its module declares; "
+                    + "grant that privilege to a role instead of assigning roles to the item");
+        }
         boolean owned = owned(ws, item);
 
         Map<UUID, Role> wanted = new LinkedHashMap<>();
@@ -299,6 +334,32 @@ public class MenuChangeApplier {
         existing.setAssignedBy(ws.actorId);
     }
 
+    private void setGroupAccess(Workspace ws, int i, MenuOp op) {
+        MenuItem item = requireLive(ws, i, op.code());
+        UserGroup group = refs.group(ws.scope, op.group())
+                .orElseThrow(() -> new MenuDraftException(i, "Group '" + op.group() + "' not found"));
+
+        MenuGroupAccess existing = ws.groupAccess.stream()
+                .filter(a -> sameItem(a.getMenuItem(), item) && a.getGroup().getId().equals(group.getId()))
+                .findFirst().orElse(null);
+
+        if (op.effect() == null) {
+            if (existing != null) {
+                ws.groupAccess.remove(existing);
+                ws.removed.add(existing);
+            }
+            return;
+        }
+        if (existing == null) {
+            existing = MenuGroupAccess.builder().menuItem(item).group(group).build();
+            ws.groupAccess.add(existing);
+            ws.created.add(existing);
+        }
+        existing.setEffect(MenuAccessEffect.valueOf(op.effect()));
+        existing.setReason(op.reason());
+        existing.setAssignedBy(ws.actorId);
+    }
+
     private void setOverride(Workspace ws, int i, MenuOp op) {
         MenuItem item = requireLive(ws, i, op.code());
         if (owned(ws, item)) throw new MenuDraftException(i, "'" + op.code() + "' is your own item; edit it directly");
@@ -341,8 +402,12 @@ public class MenuChangeApplier {
     }
 
     private MenuItem requireLive(Workspace ws, int i, String code) {
-        return ws.live().stream().filter(m -> m.getCode().equals(code)).findFirst()
+        MenuItem item = ws.live().stream().filter(m -> m.getCode().equals(code)).findFirst()
                 .orElseThrow(() -> new MenuDraftException(i, "No menu item with code '" + code + "'"));
+        if (item.isTemporary()) {
+            throw new MenuDraftException(i, "'" + code + "' is a temporary menu; manage it through the temporary-menu API");
+        }
+        return item;
     }
 
     private MenuItem findAny(Workspace ws, String code) {
@@ -359,7 +424,14 @@ public class MenuChangeApplier {
         return parentCode == null ? null : requireLive(ws, i, parentCode);
     }
 
+    private static MenuDraftException moduleItem(int i, MenuItem item) {
+        return new MenuDraftException(i, "'" + item.getCode() + "' belongs to module '"
+                + (item.getModule() == null ? "?" : item.getModule().getCode())
+                + "'; only hiding (enabled) and its sort order can be changed here");
+    }
+
     private MenuItem requireOwned(Workspace ws, int i, MenuItem item) {
+        if (item.isModule()) throw moduleItem(i, item);
         if (!owned(ws, item)) {
             throw new MenuDraftException(i, "'" + item.getCode() + "' is a platform item and cannot be edited here"
                     + (ws.scope.isGlobal() ? "" : "; use SET_OVERRIDE, SET_ENABLED or SET_ROLES instead"));

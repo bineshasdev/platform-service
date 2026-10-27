@@ -27,6 +27,48 @@ public class AppProperties {
     public static class MenuProperties {
         /** Maximum number of menu levels (root = level 1). Enforced on every write. */
         private int maxDepth = 4;
+        private CacheProperties cache = new CacheProperties();
+        private ModuleProperties modules = new ModuleProperties();
+
+        @Getter
+        @Setter
+        public static class ModuleProperties {
+            /** Largest manifest accepted, in bytes. */
+            private long maxManifestBytes = 262_144;
+            /** How often an ACTIVE module with a manifest URL is pulled. */
+            private java.time.Duration pullInterval = java.time.Duration.ofHours(1);
+            /** First retry delay after a failed pull; doubles per consecutive failure, capped at pullInterval. */
+            private java.time.Duration backoffBase = java.time.Duration.ofMinutes(1);
+            private java.time.Duration connectTimeout = java.time.Duration.ofSeconds(2);
+            private java.time.Duration readTimeout = java.time.Duration.ofSeconds(3);
+            /** Consecutive failures after which a module's health is DOWN. */
+            private int failuresBeforeDown = 5;
+            /** Manifest URLs resolving to loopback / private addresses. Off by default (SSRF); dev only. */
+            private boolean allowPrivateHosts = false;
+            /** Plain http manifest URLs. Off by default; dev only. */
+            private boolean allowInsecureHttp = false;
+            /**
+             * Codes a module may not register: the platform's own menu areas (see
+             * Docs/design/menu-catalogue.md). Module items are {@code <module>.<key>},
+             * so a module named {@code billing} would collide with {@code billing.invoices}.
+             */
+            private java.util.List<String> reservedCodes = java.util.List.of(
+                    "admin", "ai_review", "ai_studio", "billing", "charting", "claims", "coding", "compliance",
+                    "dashboard", "data", "directory", "documents", "encounters", "header", "help", "home", "inbox",
+                    "kiosk", "lab", "me", "monitoring", "network", "notifications", "orders", "pa", "patients",
+                    "pharmacy", "pp", "quick", "referral", "referrals", "reports", "results", "schedule",
+                    "settings", "staff", "telehealth", "user", "workflows");
+        }
+
+        @Getter
+        @Setter
+        public static class CacheProperties {
+            /** Safety net: a compiled catalogue is rebuilt at least this often even if no version moved. */
+            private java.time.Duration catalogueTtl = java.time.Duration.ofMinutes(5);
+            /** How often an instance re-reads the version counters. Bounds how stale a menu can be. */
+            private java.time.Duration versionCheck = java.time.Duration.ofSeconds(2);
+            private long maxEntries = 500;
+        }
     }
 
     @Getter
@@ -87,6 +129,7 @@ public class AppProperties {
             private String tenantEvents        = "platform.tenant.events";
             private String featureEvents       = "platform.feature.events";
             private String menuEvents          = "platform.menu.events";
+            private String menuCatalogEvents   = "platform.menu.catalog.events";
             private String userEvents          = "platform.user.events";
             private String notificationEvents  = "platform.notification.events";
             private String dlqSuffix           = ".DLT";

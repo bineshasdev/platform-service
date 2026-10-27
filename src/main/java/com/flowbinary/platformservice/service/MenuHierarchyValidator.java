@@ -65,6 +65,14 @@ public class MenuHierarchyValidator {
                 throw new MenuHierarchyException(Reason.CROSS_TENANT,
                         "A global item cannot sit under a tenant-owned item");
             }
+            if (newParent.isModule() && !item.isModule() && !item.isTemporary()) {
+                throw new MenuHierarchyException(Reason.MODULE_PARENT,
+                        "Only a module's own items can sit under one of its items; it would take them with it when it changes its menu");
+            }
+            if (newParent.isTemporary()) {
+                throw new MenuHierarchyException(Reason.TEMPORARY_PARENT,
+                        "A temporary menu cannot have children; it would take them with it when it expires");
+            }
             if (newParent.getDeletedAt() != null) {
                 throw new MenuHierarchyException(Reason.PARENT_NOT_FOUND,
                         "Parent '" + newParent.getCode() + "' is deleted");

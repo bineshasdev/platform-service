@@ -133,4 +133,29 @@ class MenuHierarchyValidatorTest {
     void invalidMaxDepthRejected() {
         assertThatThrownBy(() -> new MenuHierarchyValidator(0)).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void temporaryMenuCannotBeAParent() {
+        MenuItem t = item("t", null);
+        t.setSource(com.flowbinary.platformservice.model.MenuSource.TEMPORARY);
+        MenuItem n = item("n", null); n.setId(null);
+        assertThat(reasonOf(() -> validator.place(n, t, List.of(t)))).isEqualTo(Reason.TEMPORARY_PARENT);
+    }
+
+    @Test
+    void onlyAModulesOwnItemsMaySitUnderAModuleItem() {
+        MenuItem parent = item("billing.root", null);
+        parent.setSource(com.flowbinary.platformservice.model.MenuSource.MODULE);
+        MenuItem platform = item("p", null); platform.setId(null);
+        assertThat(reasonOf(() -> validator.place(platform, parent, List.of(parent)))).isEqualTo(Reason.MODULE_PARENT);
+
+        MenuItem own = item("billing.child", null); own.setId(null);
+        own.setSource(com.flowbinary.platformservice.model.MenuSource.MODULE);
+        validator.place(own, parent, List.of(parent));                       // fine
+        assertThat(own.getParent()).isSameAs(parent);
+
+        MenuItem temp = item("t", null); temp.setId(null);
+        temp.setSource(com.flowbinary.platformservice.model.MenuSource.TEMPORARY);
+        validator.place(temp, parent, List.of(parent));                      // a campaign may sit there (it is a leaf and expires)
+    }
 }

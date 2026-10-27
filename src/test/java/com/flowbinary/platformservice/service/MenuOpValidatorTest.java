@@ -58,6 +58,24 @@ class MenuOpValidatorTest {
     }
 
     @Test
+    void placementAndTenantTypesMustBeKnown() {
+        assertThatCode(() -> MenuOpValidator.validate(0,
+                put().placement("SETTINGS").tenantTypes(Set.of("CLINIC", "PRIVATE_CLINIC")).build(), GLOBAL))
+                .doesNotThrowAnyException();
+        reject(put().placement("SIDEBAR").build(), GLOBAL, "placement");
+        reject(put().tenantTypes(Set.of("HOSPITAL")).build(), GLOBAL, "tenantTypes");
+    }
+
+    @Test
+    void tenantTypesAreForGlobalItemsOnly() {
+        reject(put().tenantTypes(Set.of("LAB")).build(), TENANT, "global items");
+        reject(MenuOp.builder().op(MenuOpType.PATCH_ITEM).code("x").tenantTypes(Set.of("LAB")).build(), TENANT, "global items");
+        // empty = every type, which is what a tenant item already is
+        assertThatCode(() -> MenuOpValidator.validate(0, put().tenantTypes(Set.of()).build(), TENANT))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void tenantOnlyOperationsAreRefusedInGlobalScope() {
         reject(MenuOp.builder().op(MenuOpType.SET_OVERRIDE).code("x").build(), GLOBAL, "tenant scope");
         reject(MenuOp.builder().op(MenuOpType.SET_USER_ACCESS).code("x").userId(UUID.randomUUID()).build(), GLOBAL, "tenant scope");
