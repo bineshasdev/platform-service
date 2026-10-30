@@ -98,6 +98,16 @@ public class GlobalExceptionHandler {
         return pd;
     }
 
+    @ExceptionHandler(AuthzRuleException.class)
+    ProblemDetail handleAuthzRule(AuthzRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        pd.setTitle("Access change rejected");
+        pd.setDetail(ex.getMessage());
+        pd.setType(URI.create("urn:problem:authz-rule"));
+        pd.setProperty("rule", ex.getRule().name());
+        return pd;
+    }
+
     @ExceptionHandler({MenuConflictException.class, org.springframework.dao.OptimisticLockingFailureException.class})
     ProblemDetail handleMenuConflict(RuntimeException ex) {
         ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.CONFLICT);

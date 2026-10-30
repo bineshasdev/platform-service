@@ -45,7 +45,7 @@ public record MenuManifest(int schemaVersion, String module, String version, Lis
             String target,
             /** Where the item renders: LEFT (default), HEADER, QUICK, USER, SETTINGS, TAB, INNER or TILE. */
             String placement,
-            /** Tenant types the item applies to (CLINIC, PRIVATE_CLINIC, LAB, STORE); null or empty = every type. */
+            /** Tenant types the item applies to (CLINIC, LAB, STORE); null or empty = every type. */
             List<String> tenantTypes,
             /** Initial position among siblings. An administrator's later re-ordering is kept. */
             Integer order,

@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A clinic / polyclinic facility (tenant type {@code CLINIC} or {@code PRIVATE_CLINIC}).
+ * A clinic / polyclinic facility (tenant type {@code CLINIC}).
  * Maps to: clinics
  */
 @Entity

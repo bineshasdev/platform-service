@@ -23,7 +23,7 @@ import java.util.List;
  * <p>Columns (header names, case / spacing insensitive):
  * <ul>
  *   <li><b>clinicName</b> (required)</li>
- *   <li>displayName, privatePractice (true/false)</li>
+ *   <li>displayName</li>
  *   <li><b>adminFirstName</b>, <b>adminLastName</b>, <b>adminEmail</b> (required)</li>
  *   <li>adminPassword — generated &amp; returned when blank</li>
  *   <li>mobile, website, country, locale, currency</li>
@@ -67,7 +67,6 @@ public class ClinicImportService {
         ClinicRegistrationRequest req = new ClinicRegistrationRequest();
         req.setClinicName(row.require("clinicName"));
         req.setDisplayName(row.get("displayName"));
-        req.setPrivatePractice(row.getBoolean("privatePractice"));
         req.setAdminFirstName(row.require("adminFirstName"));
         req.setAdminLastName(row.require("adminLastName"));
         req.setAdminEmail(row.require("adminEmail"));

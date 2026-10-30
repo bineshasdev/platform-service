@@ -7,7 +7,6 @@ import com.flowbinary.platformservice.exception.MenuConflictException;
 import com.flowbinary.platformservice.exception.MenuDraftException;
 import com.flowbinary.platformservice.exception.MenuHierarchyException;
 import com.flowbinary.platformservice.model.*;
-import com.flowbinary.platformservice.repository.MenuGroupAccessRepository;
 import com.flowbinary.platformservice.repository.MenuItemRepository;
 import com.flowbinary.platformservice.repository.MenuUserAccessRepository;
 import com.flowbinary.platformservice.service.MenuAdminAccess.AdminContext;
@@ -50,7 +49,6 @@ public class TemporaryMenuService {
     private final MenuReferences            refs;
     private final MenuItemRepository        items;
     private final MenuUserAccessRepository  userAccess;
-    private final MenuGroupAccessRepository groupAccess;
     private final AuditService              audit;
     private final MenuCatalogEvents         events;
 
@@ -214,33 +212,19 @@ public class TemporaryMenuService {
         }
     }
 
-    /** Replaces the audience: roles through the item, users and groups through their grant tables. */
+    /**
+     * Replaces the audience: the named users (RESTRICTED), through GRANT rows that lapse with the menu.
+     * Reaching a kind of person is done with the menu's required privilege, not with roles.
+     */
     private void setAudience(AdminContext ctx, MenuItem item, Audience a, boolean isNew) {
-        Set<String> roleCodes = a == null || a.roles() == null ? Set.of() : a.roles();
         Set<UUID> userIds = a == null || a.users() == null ? Set.of() : a.users();
-        Set<String> groupCodes = a == null || a.groups() == null ? Set.of() : a.groups();
         MenuScope scope = ctx.scope();
 
-        if (scope.isGlobal() && (!userIds.isEmpty() || !groupCodes.isEmpty())) {
-            throw new MenuDraftException(-1, "Users and groups belong to a tenant; a platform-wide menu can target roles "
-                    + "or everyone eligible, and a tenant can target its own users and groups");
+        if (scope.isGlobal() && !userIds.isEmpty()) {
+            throw new MenuDraftException(-1, "Users belong to a tenant; a platform-wide menu can target everyone eligible "
+                    + "(narrowed by its required privilege), and a tenant can also name its own users");
         }
 
-        // roles
-        Map<UUID, Role> wantedRoles = new LinkedHashMap<>();
-        for (String code : roleCodes) {
-            Role r = refs.assignableRole(scope, code)
-                    .orElseThrow(() -> new MenuDraftException(-1, "Unknown or unassignable role '" + code + "'"));
-            wantedRoles.put(r.getId(), r);
-        }
-        item.getRoleAccess().removeIf(ra -> !wantedRoles.containsKey(ra.getRole().getId()));
-        Set<UUID> haveRoles = item.getRoleAccess().stream().map(ra -> ra.getRole().getId()).collect(Collectors.toSet());
-        wantedRoles.values().stream().filter(r -> !haveRoles.contains(r.getId())).forEach(r ->
-                item.getRoleAccess().add(MenuRoleAccess.builder()
-                        .id(new MenuRoleAccessId(item.getId(), r.getId())).menuItem(item).role(r)
-                        .assignedBy(ctx.actorId()).build()));
-
-        // users
         Map<UUID, MenuUserAccess> haveUsers = isNew ? new HashMap<>() : userAccess.findByMenuItemIdIn(List.of(item.getId()))
                 .stream().collect(Collectors.toMap(x -> x.getUser().getId(), x -> x));
         haveUsers.values().stream().filter(x -> !userIds.contains(x.getUser().getId())).forEach(userAccess::delete);
@@ -254,24 +238,6 @@ public class TemporaryMenuService {
             row.setValidTo(item.getEndsAt());          // the grant lapses with the menu
             userAccess.save(row);
         }
-
-        // groups
-        Map<UUID, MenuGroupAccess> haveGroups = isNew ? new HashMap<>() : groupAccess.findByMenuItemIdIn(List.of(item.getId()))
-                .stream().collect(Collectors.toMap(x -> x.getGroup().getId(), x -> x));
-        Map<UUID, UserGroup> wantedGroups = new LinkedHashMap<>();
-        for (String code : groupCodes) {
-            UserGroup g = refs.group(scope, code)
-                    .orElseThrow(() -> new MenuDraftException(-1, "Group '" + code + "' not found"));
-            wantedGroups.put(g.getId(), g);
-        }
-        haveGroups.values().stream().filter(x -> !wantedGroups.containsKey(x.getGroup().getId())).forEach(groupAccess::delete);
-        for (UserGroup g : wantedGroups.values()) {
-            MenuGroupAccess row = haveGroups.getOrDefault(g.getId(),
-                    MenuGroupAccess.builder().menuItem(item).group(g).assignedBy(ctx.actorId()).build());
-            row.setEffect(MenuAccessEffect.GRANT);
-            row.setReason("Temporary menu");
-            groupAccess.save(row);
-        }
     }
 
     // ── Validation / helpers ───────────────────────────────────────────────
@@ -279,9 +245,7 @@ public class TemporaryMenuService {
     private void authorise(AdminContext ctx, TemporaryMenuRequest req) {
         ctx.require(MenuAdminAccess.MANAGE);
         Audience a = req.audience();
-        boolean targeted = a != null && ((a.roles() != null && !a.roles().isEmpty())
-                || (a.users() != null && !a.users().isEmpty())
-                || (a.groups() != null && !a.groups().isEmpty()));
+        boolean targeted = a != null && a.users() != null && !a.users().isEmpty();
         if (targeted) ctx.require(MenuAdminAccess.ASSIGN);
         if (a != null && a.mode() != null && !a.mode().equals("ALL_ELIGIBLE") && !a.mode().equals("RESTRICTED")) {
             throw new MenuDraftException(-1, "audience.mode must be ALL_ELIGIBLE or RESTRICTED");
@@ -348,8 +312,6 @@ public class TemporaryMenuService {
         List<UUID> ids = list.stream().map(MenuItem::getId).filter(Objects::nonNull).toList();
         Map<UUID, List<MenuUserAccess>> users = ids.isEmpty() ? Map.of() : userAccess.findByMenuItemIdIn(ids).stream()
                 .collect(Collectors.groupingBy(x -> x.getMenuItem().getId()));
-        Map<UUID, List<MenuGroupAccess>> groups = ids.isEmpty() ? Map.of() : groupAccess.findByMenuItemIdIn(ids).stream()
-                .collect(Collectors.groupingBy(x -> x.getMenuItem().getId()));
         Instant now = Instant.now();
 
         return list.stream().map(m -> new TemporaryMenuResponse(
@@ -359,9 +321,7 @@ public class TemporaryMenuService {
                 m.getStartsAt(), m.getEndsAt(), m.isLiveAt(now),
                 m.getRequiredPrivilege() == null ? null : m.getRequiredPrivilege().getCode(), m.getRequiredFeature(),
                 m.getAudienceMode().name(),
-                m.getRoleAccess().stream().map(r -> r.getRole().getCode()).sorted().toList(),
                 users.getOrDefault(m.getId(), List.of()).stream().map(x -> x.getUser().getId()).sorted().toList(),
-                groups.getOrDefault(m.getId(), List.of()).stream().map(x -> x.getGroup().getCode()).sorted().toList(),
                 m.getCreatedBy())).toList();
     }
 }

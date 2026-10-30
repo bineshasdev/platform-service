@@ -24,19 +24,20 @@ import java.util.UUID;
  * <ul>
  *   <li>The global menu needs a platform operator ({@code SUPERADMIN}).</li>
  *   <li>A tenant scope is the caller's own tenant. Only an operator may name another.</li>
- *   <li>Within a scope, each action still needs its privilege ({@code menu.manage},
- *       {@code menu.assign}, {@code menu.publish}, {@code audit.view}) — these live in
- *       the privilege catalogue, not in the token, so they are checked here.</li>
+ *   <li>Within a scope, each action still needs its privilege
+ *       ({@code platform.navigation.edit}, {@code .manage}, {@code .publish},
+ *       {@code compliance.audit.view}) — these live in the authorization model, not in
+ *       the token, so they are checked here.</li>
  * </ul>
  */
 @Component
 @RequiredArgsConstructor
 public class MenuAdminAccess {
 
-    public static final String MANAGE  = "menu.manage";
-    public static final String ASSIGN  = "menu.assign";
-    public static final String PUBLISH = "menu.publish";
-    public static final String AUDIT   = "audit.view";
+    public static final String MANAGE  = "platform.navigation.edit";
+    public static final String ASSIGN  = "platform.navigation.manage";
+    public static final String PUBLISH = "platform.navigation.publish";
+    public static final String AUDIT   = "compliance.audit.view";
 
     private final TenantContextResolver     tenantContextResolver;
     private final TenantUserRepository      tenantUserRepository;

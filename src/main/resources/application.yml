@@ -234,6 +234,7 @@ app:
       feature-events: platform.feature.events
       menu-events: platform.menu.events
       menu-catalog-events: platform.menu.catalog.events
+      authz-events: platform.authz.events
       user-events: platform.user.events
       notification-events: platform.notification.events
       dlq-suffix: .DLT

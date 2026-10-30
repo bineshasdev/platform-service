@@ -8,9 +8,8 @@ import java.util.UUID;
 
 /**
  * Everything shared by all users of one (application, tenant): the live item
- * tree, the tenant's overrides and its groups' item grants/denies. This is what
- * the cache holds. Nothing here depends on who is asking — roles, privileges,
- * user overrides and group membership are read per request.
+ * tree and the tenant's overrides. This is what the cache holds. Nothing here
+ * depends on who is asking — privileges and user overrides are read per request.
  *
  * <p>Temporary menus that are scheduled or active are included whatever their
  * window, because {@link MenuVisibilityPolicy} checks the window against the
@@ -22,8 +21,6 @@ import java.util.UUID;
  */
 public record MenuCatalogue(List<CatalogItem> items,
                             Map<UUID, CatalogOverride> overrides,
-                            Map<UUID, Set<UUID>> groupDenied,
-                            Map<UUID, Set<UUID>> groupGranted,
                             long globalVersion,
                             long tenantVersion,
                             Instant builtAt) {

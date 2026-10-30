@@ -130,6 +130,7 @@ public class AppProperties {
             private String featureEvents       = "platform.feature.events";
             private String menuEvents          = "platform.menu.events";
             private String menuCatalogEvents   = "platform.menu.catalog.events";
+            private String authzEvents         = "platform.authz.events";
             private String userEvents          = "platform.user.events";
             private String notificationEvents  = "platform.notification.events";
             private String dlqSuffix           = ".DLT";

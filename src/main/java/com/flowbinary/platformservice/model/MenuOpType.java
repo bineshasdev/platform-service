@@ -12,17 +12,16 @@ public enum MenuOpType {
     /** Enable or disable an item (tenant scope: hide or show a global item). */
     SET_ENABLED,
     DELETE_ITEM,
-    /** Replace the roles that grant an item. Needs {@code menu.assign}. */
-    SET_ROLES,
-    /** Grant, deny or clear a single user's access. Needs {@code menu.assign}. */
+    /**
+     * Show an item the tenant hid to one user (GRANT), hide it from one user (DENY), or clear
+     * the override. Never bypasses plan, feature or privilege gates. Needs {@code menu.assign}.
+     */
     SET_USER_ACCESS,
-    /** Grant, deny or clear a group's access. Needs {@code menu.assign}; tenant scope only. */
-    SET_GROUP_ACCESS,
     /** Tenant scope only: relabel / re-icon / reorder / hide a global item. */
     SET_OVERRIDE;
 
     /** Assignment operations need {@code menu.assign}; the rest {@code menu.manage}. */
     public boolean isAssignment() {
-        return this == SET_ROLES || this == SET_USER_ACCESS || this == SET_GROUP_ACCESS;
+        return this == SET_USER_ACCESS;
     }
 }

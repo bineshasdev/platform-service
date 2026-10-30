@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.service.LegacyRoleBridge;
 import com.flowbinary.platformservice.config.KeycloakProperties;
 import com.flowbinary.platformservice.dto.ResolveTenantResponse;
 import com.flowbinary.platformservice.dto.TenantSignupRequest;
@@ -39,6 +40,7 @@ public class TenantService {
     private final PlatformEventPublisher       eventPublisher;
     private final Keycloak                     keycloakAdmin;
     private final KeycloakProperties           kcProps;
+    private final LegacyRoleBridge             authzBridge;
 
     /**
      * Registers a new tenant (Keycloak organisation) and its first admin user.
@@ -113,6 +115,7 @@ public class TenantService {
                     .status("ACTIVE")
                     .build();
             adminUser = tenantUserRepository.save(adminUser);
+            authzBridge.onTenantCreated(tenant, adminUser.getAuthUserId());
 
             // ── 6. Assign free plan ───────────────────────────────
             assignFreePlan(tenant);

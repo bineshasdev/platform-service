@@ -147,9 +147,7 @@ public class MenuPublishService {
     private static String entityType(String key) {
         return switch (key.substring(0, key.indexOf(':'))) {
             case "item"     -> "MENU_ITEM";
-            case "grants"   -> "MENU_ROLE_GRANT";
             case "override" -> "MENU_TENANT_OVERRIDE";
-            case "group"    -> "MENU_GROUP_ACCESS";
             default         -> "MENU_USER_ACCESS";
         };
     }

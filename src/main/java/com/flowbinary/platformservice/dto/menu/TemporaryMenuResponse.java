@@ -10,6 +10,6 @@ public record TemporaryMenuResponse(String code, String label, String descriptio
                                     /** Whether users can see it right now. */
                                     boolean live,
                                     String requiredPrivilege, String requiredFeature,
-                                    String audienceMode, List<String> roles, List<UUID> users, List<String> groups,
+                                    String audienceMode, List<UUID> users,
                                     UUID createdBy) {
 }

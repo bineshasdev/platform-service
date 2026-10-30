@@ -74,14 +74,11 @@ final class MenuTreeBuilder {
         String icon = override != null && override.icon() != null
                 ? override.icon() : item.icon();
 
-        List<String> roleCodes = item.roleCodes().stream().sorted().toList();
-
         return MenuEntry.builder()
                 .id(item.code())
                 .label(label)
                 .icon(icon)
                 .path(item.route())
-                .roles(roleCodes.isEmpty() ? null : roleCodes)
                 .feature(item.requiredFeature())
                 .type(item.type().name())
                 .behavior(item.behavior().name())

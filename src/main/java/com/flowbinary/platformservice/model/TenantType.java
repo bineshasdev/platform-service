@@ -7,15 +7,12 @@ package com.flowbinary.platformservice.model;
  */
 public enum TenantType {
 
-    /** Multi-practitioner clinic / polyclinic / hospital OPD. */
+    /** Clinic of any size: solo practice, polyclinic or hospital OPD. */
     CLINIC,
 
     /** Diagnostic, pathology or imaging laboratory. */
     LAB,
 
     /** Pharmacy or medical store. */
-    STORE,
-
-    /** Single practitioner running a private practice. */
-    PRIVATE_CLINIC
+    STORE
 }

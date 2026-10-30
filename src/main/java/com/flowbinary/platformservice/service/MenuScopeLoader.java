@@ -21,7 +21,6 @@ public class MenuScopeLoader {
     private final MenuItemRepository           menuItemRepository;
     private final MenuTenantOverrideRepository overrideRepository;
     private final MenuUserAccessRepository     userAccessRepository;
-    private final MenuGroupAccessRepository    groupAccessRepository;
     private final MenuSnapshotRepository       snapshotRepository;
     private final EntityManager                entityManager;
     private final PlatformTransactionManager   transactionManager;
@@ -35,13 +34,11 @@ public class MenuScopeLoader {
                 : overrideRepository.findByTenantIdAndMenuItemApplicationId(scope.tenantId(), appId);
         List<MenuUserAccess> access = scope.isGlobal() ? List.of()
                 : userAccessRepository.findForTenantAndApplication(scope.tenantId(), appId);
-        List<MenuGroupAccess> groupAccess = scope.isGlobal() ? List.of()
-                : groupAccessRepository.findForTenantAndApplication(scope.tenantId(), appId);
-        return new MenuChangeApplier.Workspace(scope, actorId, items, overrides, access, groupAccess);
+        return new MenuChangeApplier.Workspace(scope, actorId, items, overrides, access);
     }
 
     public Map<String, Object> capture(MenuChangeApplier.Workspace ws) {
-        return MenuScopeState.capture(ws.scope, ws.items, ws.overrides, ws.userAccess, ws.groupAccess);
+        return MenuScopeState.capture(ws.scope, ws.items, ws.overrides, ws.userAccess);
     }
 
     /** Writes what the applier created and removed, then flushes so queries see it. */

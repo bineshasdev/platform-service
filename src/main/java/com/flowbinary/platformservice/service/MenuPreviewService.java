@@ -1,5 +1,7 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.model.AuthzRole;
+import com.flowbinary.platformservice.authz.repository.AuthzRoleRepository;
 import com.flowbinary.platformservice.dto.menu.PreviewRequest;
 import com.flowbinary.platformservice.dto.menu.PreviewResponse;
 import com.flowbinary.platformservice.model.*;
@@ -33,7 +35,7 @@ public class MenuPreviewService {
     private final MenuResolutionService     resolution;
     private final MenuQueryService          queryService;
     private final SettingsResolver          settings;
-    private final MenuReferences            refs;
+    private final AuthzRoleRepository       authzRoles;
     private final TenantRepository          tenantRepository;
     private final TenantUserRepository      tenantUserRepository;
 
@@ -66,7 +68,8 @@ public class MenuPreviewService {
                 return resolution.resolveUncached(new MenuResolutionService.MenuContext(
                         evalTenant, user, scope.application().getCode(), plan.planCode(), plan.features(), locale));
             }
-            Role role = refs.assignableRole(new MenuScope(scope.application(), evalTenant), req.roleCode())
+            AuthzRole role = authzRoles.findByTenantIdAndCode(evalTenant.getId(), req.roleCode())
+                    .filter(AuthzRole::isActive)
                     .orElseThrow(() -> new NoSuchElementException("Role not found"));
             return resolution.resolveForRole(role, new MenuResolutionService.MenuContext(
                     evalTenant, null, scope.application().getCode(), plan.planCode(), plan.features(), "en"));

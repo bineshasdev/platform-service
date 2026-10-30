@@ -99,7 +99,7 @@ class MenuCatalogueSeedIT {
 
     @Test
     void roleToLeftMenuMatchesTheCatalogue() {
-        Tenant clinic = tenant("CLINIC"), privateClinic = tenant("PRIVATE_CLINIC"), lab = tenant("LAB"), store = tenant("STORE");
+        Tenant clinic = tenant("CLINIC"), lab = tenant("LAB"), store = tenant("STORE");
         Map<String, Set<String>> actual = new LinkedHashMap<>(), expected = new LinkedHashMap<>();
 
         record Case(String label, Tenant t, String role, Set<String> top) {
@@ -107,7 +107,6 @@ class MenuCatalogueSeedIT {
         List<Case> cases = List.of(
                 new Case("CLINIC_ADMIN/clinic", clinic, "CLINIC_ADMIN", set("home", "schedule", "patients", "billing", "claims", "network", "referrals", "ai_review", "reports", "compliance", "settings")),
                 new Case("DOCTOR/clinic", clinic, "DOCTOR", set("home", "schedule", "patients", "encounters", "inbox", "orders", "telehealth", "monitoring", "referrals", "network", "ai_review", "reports")),
-                new Case("DOCTOR/private clinic", privateClinic, "DOCTOR", set("home", "schedule", "patients", "encounters", "inbox", "orders", "telehealth", "monitoring", "referrals", "network", "ai_review", "reports")),
                 new Case("NURSE/clinic", clinic, "NURSE", set("home", "schedule", "patients", "encounters", "inbox", "orders", "monitoring", "referrals", "network")),
                 new Case("RECEPTIONIST/clinic", clinic, "RECEPTIONIST", set("home", "schedule", "patients", "billing")),
                 new Case("MEDICAL_CODER/clinic", clinic, "MEDICAL_CODER", set("home", "coding", "ai_review", "encounters", "inbox", "reports")),

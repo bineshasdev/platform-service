@@ -42,8 +42,8 @@ class MenuVisibilityPolicyTest {
     @Test
     void tenantTypeGateHidesItemFromOtherTypes() {
         MenuItem m = open("charting", null, doctor);
-        m.setTenantTypes(java.util.List.of("CLINIC", "PRIVATE_CLINIC"));
-        assertThat(MenuVisibilityPolicy.evaluate(CatalogItem.of(m), ofType("PRIVATE_CLINIC", false, Map.of()))).isEqualTo(Verdict.VISIBLE);
+        m.setTenantTypes(java.util.List.of("CLINIC", "STORE"));
+        assertThat(MenuVisibilityPolicy.evaluate(CatalogItem.of(m), ofType("STORE", false, Map.of()))).isEqualTo(Verdict.VISIBLE);
         assertThat(MenuVisibilityPolicy.evaluate(CatalogItem.of(m), ofType("LAB", false, Map.of()))).isEqualTo(Verdict.TENANT_TYPE);
     }
 

@@ -28,6 +28,7 @@ import java.util.UUID;
         @JsonSubTypes.Type(value = FeatureToggledEvent.class,   name = "FEATURE_TOGGLED"),
         @JsonSubTypes.Type(value = MenuItemUpdatedEvent.class,  name = "MENU_ITEM_UPDATED"),
         @JsonSubTypes.Type(value = MenuCatalogChangedEvent.class, name = "MENU_CATALOG_CHANGED"),
+        @JsonSubTypes.Type(value = AuthzChangedEvent.class,     name = "AUTHZ_CHANGED"),
         @JsonSubTypes.Type(value = UserCreatedEvent.class,      name = "USER_CREATED"),
         @JsonSubTypes.Type(value = UserUpdatedEvent.class,      name = "USER_UPDATED"),
         @JsonSubTypes.Type(value = UserDeletedEvent.class,      name = "USER_DELETED"),

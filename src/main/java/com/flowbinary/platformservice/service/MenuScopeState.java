@@ -11,15 +11,18 @@ import java.util.stream.Collectors;
  * difference between two of them.
  *
  * <pre>
- *   item:&lt;code&gt;              an item the scope owns, with its roles and plans
+ *   item:&lt;code&gt;              an item the scope owns, with its plans
  *   moditem:&lt;code&gt;          a module item's admin-controlled part (enabled, sortOrder); global scope only
- *   grants:&lt;code&gt;            roles of this tenant granted on a platform item
  *   override:&lt;code&gt;          tenant relabel/reorder/hide of a platform item
  *   user:&lt;code&gt;:&lt;userId&gt;    one user's GRANT/DENY on an item
- *   group:&lt;code&gt;:&lt;group&gt;    one group's GRANT/DENY on an item
  * </pre>
  * Values are plain maps/lists/strings so they round-trip through jsonb and
  * compare with {@code equals}.
+ *
+ * <p>Snapshots taken before roles and groups left the menu model also hold
+ * {@code grants:} and {@code group:} atoms and a {@code roles} field on items.
+ * {@link #diff} ignores them, so such a snapshot can still be compared and
+ * rolled back to.
  */
 public final class MenuScopeState {
 
@@ -36,8 +39,7 @@ public final class MenuScopeState {
     public static Map<String, Object> capture(MenuScope scope,
                                               Collection<MenuItem> items,
                                               Collection<MenuTenantOverride> overrides,
-                                              Collection<MenuUserAccess> userAccess,
-                                              Collection<MenuGroupAccess> groupAccess) {
+                                              Collection<MenuUserAccess> userAccess) {
         Map<String, Object> state = new TreeMap<>();
         UUID tenantId = scope.tenantId();
 
@@ -55,12 +57,6 @@ public final class MenuScopeState {
             UUID owner = m.getTenant() == null ? null : m.getTenant().getId();
             if (Objects.equals(owner, tenantId)) {
                 state.put("item:" + m.getCode(), itemAtom(m));
-            } else if (!scope.isGlobal() && owner == null) {
-                List<String> own = m.getRoleAccess().stream()
-                        .map(MenuRoleAccess::getRole)
-                        .filter(r -> r.getTenant() != null && Objects.equals(r.getTenant().getId(), tenantId))
-                        .map(Role::getCode).sorted().toList();
-                if (!own.isEmpty()) state.put("grants:" + m.getCode(), Map.of("roles", own));
             }
         }
         for (MenuTenantOverride o : overrides) {
@@ -79,13 +75,6 @@ public final class MenuScopeState {
             atom.put("reason", a.getReason());
             atom.put("validTo", a.getValidTo() == null ? null : a.getValidTo().toString());
             state.put("user:" + a.getMenuItem().getCode() + ":" + a.getUser().getId(), atom);
-        }
-        for (MenuGroupAccess a : groupAccess) {
-            if (a.getMenuItem().isTemporary()) continue;
-            Map<String, Object> atom = new LinkedHashMap<>();
-            atom.put("effect", a.getEffect().name());
-            atom.put("reason", a.getReason());
-            state.put("group:" + a.getMenuItem().getCode() + ":" + a.getGroup().getCode(), atom);
         }
         return state;
     }
@@ -109,7 +98,6 @@ public final class MenuScopeState {
         a.put("requiredFeature", m.getRequiredFeature());
         a.put("plans", m.getPlanAccess().stream().map(p -> p.getId().getPlan().name()).sorted().toList());
         a.put("tenantTypes", m.getTenantTypes() == null ? null : m.getTenantTypes().stream().sorted().toList());
-        a.put("roles", m.getRoleAccess().stream().map(r -> r.getRole().getCode()).sorted().toList());
         return a;
     }
 
@@ -121,6 +109,7 @@ public final class MenuScopeState {
         Set<String> keys = new TreeSet<>(before.keySet());
         keys.addAll(after.keySet());
         for (String k : keys) {
+            if (isLegacy(k)) continue;
             Map<String, Object> b = (Map<String, Object>) before.get(k);
             Map<String, Object> a = (Map<String, Object>) after.get(k);
             if (b == null) out.add(new Change(k, Kind.CREATE, null, a));
@@ -130,9 +119,14 @@ public final class MenuScopeState {
         return out;
     }
 
+    /** Atoms from the retired role and group assignments. */
+    private static boolean isLegacy(String key) {
+        return key.startsWith("grants:") || key.startsWith("group:");
+    }
+
     /** jsonb round-trips can turn Integer into Long or List into ArrayList; compare on strings. */
     private static Map<String, String> normalise(Map<String, Object> atom) {
-        return atom.entrySet().stream().collect(Collectors.toMap(
+        return atom.entrySet().stream().filter(e -> !"roles".equals(e.getKey())).collect(Collectors.toMap(
                 Map.Entry::getKey, e -> String.valueOf(e.getValue()), (x, y) -> x, TreeMap::new));
     }
 
@@ -174,22 +168,12 @@ public final class MenuScopeState {
                     rest.add(MenuOp.builder().op(MenuOpType.PATCH_ITEM).code(k.substring(8))
                             .enabled((Boolean) a.get("enabled")).sortOrder(number(a.get("sortOrder"))).build());
                 }
-            } else if (k.startsWith("grants:")) {
-                List<String> roles = a == null ? List.of() : (List<String>) a.get("roles");
-                rest.add(MenuOp.builder().op(MenuOpType.SET_ROLES).code(k.substring(7))
-                        .roles(new TreeSet<>(roles)).build());
             } else if (k.startsWith("override:")) {
                 rest.add(MenuOp.builder().op(MenuOpType.SET_OVERRIDE).code(k.substring(9))
                         .label(a == null ? null : (String) a.get("label"))
                         .icon(a == null ? null : (String) a.get("icon"))
                         .sortOrder(a == null ? null : number(a.get("sortOrder")))
                         .hidden(a != null && Boolean.TRUE.equals(a.get("hidden")))
-                        .build());
-            } else if (k.startsWith("group:")) {
-                String[] p = k.split(":", 3);
-                rest.add(MenuOp.builder().op(MenuOpType.SET_GROUP_ACCESS).code(p[1]).group(p[2])
-                        .effect(a == null ? null : (String) a.get("effect"))
-                        .reason(a == null ? null : (String) a.get("reason"))
                         .build());
             } else if (k.startsWith("user:")) {
                 String[] p = k.split(":", 3);
@@ -220,7 +204,6 @@ public final class MenuScopeState {
                 .enabled((Boolean) a.get("enabled"))
                 .requiredPrivilege((String) a.get("requiredPrivilege")).requiredFeature((String) a.get("requiredFeature"))
                 .plans(new TreeSet<>((List<String>) a.get("plans")))
-                .roles(new TreeSet<>((List<String>) a.get("roles")))
                 .build();
     }
 

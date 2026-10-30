@@ -37,19 +37,16 @@ public class MenuChangeApplier {
         public final List<MenuItem> items;
         public final List<MenuTenantOverride> overrides;
         public final List<MenuUserAccess> userAccess;
-        public final List<MenuGroupAccess> groupAccess;
         public final List<Object> created = new ArrayList<>();
         public final List<Object> removed = new ArrayList<>();
 
         public Workspace(MenuScope scope, UUID actorId, List<MenuItem> items,
-                         List<MenuTenantOverride> overrides, List<MenuUserAccess> userAccess,
-                         List<MenuGroupAccess> groupAccess) {
+                         List<MenuTenantOverride> overrides, List<MenuUserAccess> userAccess) {
             this.scope = scope;
             this.actorId = actorId;
             this.items = new ArrayList<>(items);
             this.overrides = new ArrayList<>(overrides);
             this.userAccess = new ArrayList<>(userAccess);
-            this.groupAccess = new ArrayList<>(groupAccess);
         }
 
         List<MenuItem> live() {
@@ -85,9 +82,7 @@ public class MenuChangeApplier {
             case REORDER         -> reorder(ws, i, op);
             case SET_ENABLED     -> setEnabled(ws, i, op);
             case DELETE_ITEM     -> deleteItem(ws, i, op);
-            case SET_ROLES       -> setRoles(ws, i, requireLive(ws, i, op.code()), op.roles());
             case SET_USER_ACCESS -> setUserAccess(ws, i, op);
-            case SET_GROUP_ACCESS -> setGroupAccess(ws, i, op);
             case SET_OVERRIDE    -> setOverride(ws, i, op);
         }
     }
@@ -142,9 +137,8 @@ public class MenuChangeApplier {
 
         place(ws, i, item, parentOrNull(ws, i, op.parentCode()));
 
-        // null = unchanged on an existing item; a new item defaults to every plan and no roles.
+        // null = unchanged on an existing item; a new item defaults to every plan.
         if (op.plans() != null || isNew) setPlans(item, op.plans());
-        if (op.roles() != null) setRoles(ws, i, item, op.roles());
     }
 
     private void patchItem(Workspace ws, int i, MenuOp op) {
@@ -250,44 +244,6 @@ public class MenuChangeApplier {
 
     // ── Assignments ────────────────────────────────────────────────────────
 
-    private void setRoles(Workspace ws, int i, MenuItem item, Set<String> codes) {
-        if (item.isModule()) {
-            throw new MenuDraftException(i, "'" + item.getCode() + "' is gated by the privilege its module declares; "
-                    + "grant that privilege to a role instead of assigning roles to the item");
-        }
-        boolean owned = owned(ws, item);
-
-        Map<UUID, Role> wanted = new LinkedHashMap<>();
-        for (String code : codes) {
-            Role role = refs.assignableRole(ws.scope, code)
-                    .orElseThrow(() -> new MenuDraftException(i, "Unknown or unassignable role '" + code + "'"));
-            if (!owned && role.getTenant() == null) {
-                throw new MenuDraftException(i, "System roles on a platform item are managed by platform operators; "
-                        + "use one of your own roles or a user override for '" + code + "'");
-            }
-            wanted.put(role.getId(), role);
-        }
-
-        // Only the roles this scope manages are replaced; a tenant leaves system-role grants alone.
-        item.getRoleAccess().removeIf(ra -> manages(ws, owned, ra.getRole()) && !wanted.containsKey(ra.getRole().getId()));
-        Set<UUID> present = item.getRoleAccess().stream().map(ra -> ra.getRole().getId()).collect(Collectors.toSet());
-        for (Role role : wanted.values()) {
-            if (present.contains(role.getId())) continue;
-            item.getRoleAccess().add(MenuRoleAccess.builder()
-                    .id(new MenuRoleAccessId(item.getId(), role.getId()))
-                    .menuItem(item)
-                    .role(role)
-                    .assignedBy(ws.actorId)
-                    .build());
-        }
-    }
-
-    private static boolean manages(Workspace ws, boolean ownedItem, Role role) {
-        if (ws.scope.isGlobal()) return role.getTenant() == null;
-        if (ownedItem) return true;
-        return role.getTenant() != null && Objects.equals(role.getTenant().getId(), ws.scope.tenantId());
-    }
-
     private void setPlans(MenuItem item, Set<String> plans) {
         Set<TenantPlan> wanted = plans == null
                 ? EnumSet.allOf(TenantPlan.class)
@@ -331,32 +287,6 @@ public class MenuChangeApplier {
         existing.setEffect(effect);
         existing.setReason(op.reason());
         existing.setValidTo(op.validTo());
-        existing.setAssignedBy(ws.actorId);
-    }
-
-    private void setGroupAccess(Workspace ws, int i, MenuOp op) {
-        MenuItem item = requireLive(ws, i, op.code());
-        UserGroup group = refs.group(ws.scope, op.group())
-                .orElseThrow(() -> new MenuDraftException(i, "Group '" + op.group() + "' not found"));
-
-        MenuGroupAccess existing = ws.groupAccess.stream()
-                .filter(a -> sameItem(a.getMenuItem(), item) && a.getGroup().getId().equals(group.getId()))
-                .findFirst().orElse(null);
-
-        if (op.effect() == null) {
-            if (existing != null) {
-                ws.groupAccess.remove(existing);
-                ws.removed.add(existing);
-            }
-            return;
-        }
-        if (existing == null) {
-            existing = MenuGroupAccess.builder().menuItem(item).group(group).build();
-            ws.groupAccess.add(existing);
-            ws.created.add(existing);
-        }
-        existing.setEffect(MenuAccessEffect.valueOf(op.effect()));
-        existing.setReason(op.reason());
         existing.setAssignedBy(ws.actorId);
     }
 
@@ -434,7 +364,7 @@ public class MenuChangeApplier {
         if (item.isModule()) throw moduleItem(i, item);
         if (!owned(ws, item)) {
             throw new MenuDraftException(i, "'" + item.getCode() + "' is a platform item and cannot be edited here"
-                    + (ws.scope.isGlobal() ? "" : "; use SET_OVERRIDE, SET_ENABLED or SET_ROLES instead"));
+                    + (ws.scope.isGlobal() ? "" : "; use SET_OVERRIDE or SET_ENABLED instead"));
         }
         return item;
     }

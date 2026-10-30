@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.service.LegacyRoleBridge;
 import com.flowbinary.platformservice.domain.Clinic;
 import com.flowbinary.platformservice.domain.ClinicCategory;
 import com.flowbinary.platformservice.dto.registration.ClinicRegistrationRequest;
@@ -28,7 +29,7 @@ import java.util.UUID;
  *
  * <p>Low-friction: only a clinic name and one admin user are required. Creates
  * the Keycloak organisation + admin user, the {@link Tenant} (type
- * {@code CLINIC} or {@code PRIVATE_CLINIC}), the operational {@link Clinic} row,
+ * {@code CLINIC}, solo practices included), the operational {@link Clinic} row,
  * and a free-plan subscription. The tenant starts
  * {@link VerificationStatus#PENDING} / unlisted; legal profile, credentials and
  * verification are handled by their own services / endpoints.
@@ -48,6 +49,7 @@ public class ClinicRegistrationService {
     private final PlatformEventPublisher       eventPublisher;
     private final KeycloakUserService          keycloak;
     private final ApplicationEventPublisher    applicationEvents;
+    private final LegacyRoleBridge             authzBridge;
 
     private static final String DEFAULT_COUNTRY  = "IN";
     private static final String DEFAULT_LOCALE    = "en-IN";
@@ -75,7 +77,7 @@ public class ClinicRegistrationService {
             throw new IllegalArgumentException("Email already registered: " + request.getAdminEmail());
         }
 
-        TenantType type = request.isPrivatePractice() ? TenantType.PRIVATE_CLINIC : TenantType.CLINIC;
+        TenantType type = TenantType.CLINIC;
         String displayName = StringUtils.hasText(request.getDisplayName())
                 ? request.getDisplayName() : request.getClinicName();
 
@@ -126,6 +128,7 @@ public class ClinicRegistrationService {
                     .status("ACTIVE")
                     .build();
             adminUser = tenantUserRepository.save(adminUser);
+            authzBridge.onTenantCreated(tenant, adminUser.getAuthUserId());
 
             Clinic clinic = new Clinic();
             clinic.setTenant(tenant);

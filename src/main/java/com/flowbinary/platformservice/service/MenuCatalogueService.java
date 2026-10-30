@@ -25,9 +25,6 @@ public class MenuCatalogueService {
         Map<UUID, MenuTenantOverride> overrides = new HashMap<>();
         ws.overrides.forEach(o -> overrides.put(o.getMenuItem().getId(), o));
 
-        Map<UUID, List<MenuGroupAccess>> byItem = new HashMap<>();
-        ws.groupAccess.forEach(a -> byItem.computeIfAbsent(a.getMenuItem().getId(), k -> new ArrayList<>()).add(a));
-
         return ws.live().stream()
                 .sorted(Comparator.comparingInt(MenuItem::getDepth).thenComparingInt(MenuItem::getSortOrder))
                 .map(m -> {
@@ -40,21 +37,13 @@ public class MenuCatalogueService {
                             m.getIsActive(), m.getIsVisible(), editable,
                             m.getRequiredPrivilege() == null ? null : m.getRequiredPrivilege().getCode(),
                             m.getRequiredFeature(),
-                            m.getRoleAccess().stream().map(r -> r.getRole().getCode()).sorted().toList(),
                             m.getPlanAccess().stream().map(p -> p.getId().getPlan().name()).sorted().toList(),
                             m.getTenantTypes() == null ? null : m.getTenantTypes().stream().sorted().toList(),
                             o == null ? null : new CatalogueItem.Override(o.getLabel(), o.getIcon(), o.getSortOrder(),
                                     Boolean.TRUE.equals(o.getIsHidden())),
-                            groupCodes(byItem.get(m.getId()), MenuAccessEffect.GRANT),
-                            groupCodes(byItem.get(m.getId()), MenuAccessEffect.DENY),
                             m.getSource().name(), m.getLifecycleStatus().name(), m.getStartsAt(), m.getEndsAt(),
                             m.getModule() == null ? null : m.getModule().getCode());
                 })
                 .toList();
-    }
-
-    private static List<String> groupCodes(List<MenuGroupAccess> rows, MenuAccessEffect effect) {
-        if (rows == null) return List.of();
-        return rows.stream().filter(a -> a.getEffect() == effect).map(a -> a.getGroup().getCode()).sorted().toList();
     }
 }

@@ -39,12 +39,20 @@ public record CatalogItem(UUID id,
                           Set<String> plans,
                           /** Tenant types the item applies to; empty = every type. */
                           Set<String> tenantTypes,
-                          Set<UUID> roleIds,
-                          Set<String> roleCodes,
                           Map<String, String> translations) {
 
-    /** Snapshot of an entity. Must run inside the transaction that loaded it. */
+    /** Snapshot keeping each item's own privilege code (tests, and callers with no authorization catalogue). */
     public static CatalogItem of(MenuItem m) {
+        return of(m, Map.of());
+    }
+
+    /**
+     * Snapshot of an entity. Must run inside the transaction that loaded it.
+     * Items still name their privilege by its old code; {@code privilegeCodes}
+     * maps old codes to the authorization model's codes (an unmapped code is kept,
+     * so such an item stays hidden from everyone until it is mapped).
+     */
+    public static CatalogItem of(MenuItem m, Map<String, String> privilegeCodes) {
         return new CatalogItem(
                 m.getId(),
                 m.getParent() == null ? null : m.getParent().getId(),
@@ -54,13 +62,12 @@ public record CatalogItem(UUID id,
                 Boolean.TRUE.equals(m.getSeparatorBefore()),
                 Boolean.TRUE.equals(m.getIsVisible()),
                 m.getRequiredFeature(),
-                m.getRequiredPrivilege() == null ? null : m.getRequiredPrivilege().getCode(),
+                m.getRequiredPrivilege() == null ? null
+                        : privilegeCodes.getOrDefault(m.getRequiredPrivilege().getCode(), m.getRequiredPrivilege().getCode()),
                 m.isTemporary(), m.getSource(), m.getLifecycleStatus(), m.getStartsAt(), m.getEndsAt(),
                 m.getAudienceMode(), m.getBadge(),
                 m.getPlanAccess().stream().map(p -> p.getId().getPlan().name().toLowerCase()).collect(Collectors.toUnmodifiableSet()),
                 m.getTenantTypes() == null ? Set.of() : Set.copyOf(m.getTenantTypes()),
-                m.getRoleAccess().stream().map(r -> r.getId().getRoleId()).collect(Collectors.toUnmodifiableSet()),
-                m.getRoleAccess().stream().map(r -> r.getRole().getCode()).collect(Collectors.toUnmodifiableSet()),
                 m.getTranslations().stream().collect(Collectors.toUnmodifiableMap(
                         t -> t.getId().getLocale().toLowerCase(), MenuItemTranslation::getLabel, (a, b) -> a)));
     }

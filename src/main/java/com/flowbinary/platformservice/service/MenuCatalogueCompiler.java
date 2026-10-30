@@ -1,9 +1,6 @@
 package com.flowbinary.platformservice.service;
 
-import com.flowbinary.platformservice.model.MenuGroupAccess;
 import com.flowbinary.platformservice.model.MenuItem;
-import com.flowbinary.platformservice.model.MenuAccessEffect;
-import com.flowbinary.platformservice.repository.MenuGroupAccessRepository;
 import com.flowbinary.platformservice.repository.MenuItemRepository;
 import com.flowbinary.platformservice.repository.MenuTenantOverrideRepository;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +22,6 @@ public class MenuCatalogueCompiler {
 
     private final MenuItemRepository           items;
     private final MenuTenantOverrideRepository overrides;
-    private final MenuGroupAccessRepository    groupAccess;
     private final JdbcTemplate                 jdbc;
 
     @Transactional(readOnly = true)
@@ -50,25 +46,22 @@ public class MenuCatalogueCompiler {
     @Transactional(readOnly = true)
     public MenuCatalogue compile(String applicationCode, UUID tenantId, Versions v) {
         Instant now = Instant.now();
+        Map<String, String> privilegeCodes = legacyPrivilegeCodes();
         List<CatalogItem> compiled = items.findCatalogueSource(applicationCode, tenantId, now).stream()
-                .map(CatalogItem::of)
+                .map(m -> CatalogItem.of(m, privilegeCodes))
                 .toList();
 
         Map<UUID, CatalogOverride> tenantOverrides = new HashMap<>();
         overrides.findByTenantId(tenantId).forEach(o -> tenantOverrides.put(o.getMenuItem().getId(), CatalogOverride.of(o)));
 
-        Map<UUID, Set<UUID>> denied = new HashMap<>(), granted = new HashMap<>();
-        for (MenuGroupAccess a : groupAccess.findForTenantAndApplicationCode(tenantId, applicationCode)) {
-            Map<UUID, Set<UUID>> target = a.getEffect() == MenuAccessEffect.DENY ? denied : granted;
-            target.computeIfAbsent(a.getGroup().getId(), k -> new HashSet<>()).add(a.getMenuItem().getId());
-        }
-        return new MenuCatalogue(compiled, Map.copyOf(tenantOverrides), freeze(denied), freeze(granted),
-                v.global(), v.tenant(), now);
+        return new MenuCatalogue(compiled, Map.copyOf(tenantOverrides), v.global(), v.tenant(), now);
     }
 
-    private static Map<UUID, Set<UUID>> freeze(Map<UUID, Set<UUID>> m) {
-        Map<UUID, Set<UUID>> out = new HashMap<>();
-        m.forEach((k, v) -> out.put(k, Set.copyOf(v)));
+    /** Old {@code privileges.code} → the authorization model's code, for the items that still use old codes. */
+    private Map<String, String> legacyPrivilegeCodes() {
+        Map<String, String> out = new HashMap<>();
+        jdbc.query("SELECT legacy_code, code FROM authz_privileges WHERE legacy_code IS NOT NULL",
+                rs -> { out.put(rs.getString(1), rs.getString(2)); });
         return Map.copyOf(out);
     }
 }

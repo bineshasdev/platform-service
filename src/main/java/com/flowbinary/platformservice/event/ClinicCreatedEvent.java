@@ -26,7 +26,7 @@ public class ClinicCreatedEvent extends PlatformEvent {
     private String email;
     private String plan;
 
-    /** Tenant business type (CLINIC or PRIVATE_CLINIC). */
+    /** Tenant business type (always CLINIC). */
     private String type;
 
     /** Verification status at creation — always PENDING for this flow. */

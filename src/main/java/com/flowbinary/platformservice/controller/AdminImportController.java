@@ -40,7 +40,7 @@ public class AdminImportController {
 
     @PostMapping(value = "/clinics", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Import clinics from a spreadsheet",
-            description = "Columns: clinicName*, displayName, privatePractice, adminFirstName*, adminLastName*, "
+            description = "Columns: clinicName*, displayName, adminFirstName*, adminLastName*, "
                     + "adminEmail*, adminPassword, mobile, website, country, locale, currency, clinicCategory, specialties.")
     @ApiResponse(responseCode = "200", description = "Import processed — see per-row outcomes")
     ImportResult importClinics(@RequestParam("file") MultipartFile file) throws IOException {

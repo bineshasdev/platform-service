@@ -45,10 +45,7 @@ public record MenuOp(
         /** {@link TenantType} names; global items only. PUT: null or empty = every type. PATCH: empty clears the gate. */
         Set<String>  tenantTypes,
         // assignment
-        Set<String>  roles,
         UUID         userId,
-        /** SET_GROUP_ACCESS: the tenant's group code. */
-        String       group,
         String       effect,
         String       reason,
         Instant      validTo,

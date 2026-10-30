@@ -19,7 +19,7 @@ public class TenantCreatedEvent extends PlatformEvent {
     private String email;
     private String plan;
 
-    /** Tenant business type (CLINIC, LAB, STORE, PRIVATE_CLINIC); null for legacy signups. */
+    /** Tenant business type (CLINIC, LAB, STORE); null for legacy signups. */
     private String type;
 
     /** Verification status at creation — always PENDING for the registration flow. */

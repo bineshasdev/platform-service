@@ -4,7 +4,7 @@ spring:
     username: cliniqai
     password: cliniqai_secret
   jpa:
-    show-sql: true
+    show-sql: false
   kafka: 
     bootstrap-servers: localhost:9092
   cloud:

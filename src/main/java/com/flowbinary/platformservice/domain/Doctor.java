@@ -127,7 +127,7 @@ public class Doctor extends BaseEntity {
 
     /**
      * Practice owned by this doctor, when they also run their own clinic
-     * (tenant type {@code PRIVATE_CLINIC}). Null for doctors who only practise
+     * (a {@code CLINIC} tenant). Null for doctors who only practise
      * at other clinics.
      */
     @ManyToOne(fetch = FetchType.LAZY)

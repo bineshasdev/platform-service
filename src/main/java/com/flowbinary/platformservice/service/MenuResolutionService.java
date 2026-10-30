@@ -1,9 +1,17 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.model.AuthzRole;
+import com.flowbinary.platformservice.authz.service.EffectivePermissionService;
+import com.flowbinary.platformservice.authz.service.PermissionCalculator;
+import com.flowbinary.platformservice.authz.service.PermissionCalculator.RoleContribution;
+import com.flowbinary.platformservice.authz.service.PermissionCalculator.Scope;
+import com.flowbinary.platformservice.authz.service.PermissionSet;
+import com.flowbinary.platformservice.authz.service.TenantFeatures;
 import com.flowbinary.platformservice.dto.bootstrap.MenuEntry;
 import com.flowbinary.platformservice.model.*;
 import com.flowbinary.platformservice.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,14 +22,15 @@ import java.util.stream.Collectors;
 /**
  * Resolves the effective menu for a (user, application, tenant) triple.
  *
- * <p>An item is included when all of the following hold:
- * <ol>
- *   <li>it is live in the requested application — active, not soft-deleted;</li>
- *   <li>{@link MenuVisibilityPolicy} lets it through (plan, feature, privilege, deny, grant, tenant hide).</li>
- * </ol>
+ * <p>Navigation follows privileges (design §9, §19). An item is included when
+ * {@link MenuVisibilityPolicy} lets it through: it is live, matches the tenant's
+ * type and plan, its feature is enabled, and the user holds the privilege it
+ * requires in the authorization model, with user-level and tenant overrides
+ * applied last. There is no role-to-menu mapping.
  * {@link MenuTreeBuilder} then assembles the tree, prunes parents left without
  * children, applies tenant relabel/reorder and localises labels.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MenuResolutionService {
@@ -30,10 +39,8 @@ public class MenuResolutionService {
     public static final String DEFAULT_APPLICATION = "PROVIDER_CONSOLE";
 
     private final MenuUserAccessRepository      menuUserAccessRepository;
-    private final UserRoleAssignmentRepository  userRoleAssignmentRepository;
-    private final RolePrivilegeRepository       rolePrivilegeRepository;
-    private final RoleRepository                roleRepository;
-    private final UserGroupMemberRepository     userGroupMemberRepository;
+    private final EffectivePermissionService    permissions;
+    private final TenantFeatures                tenantFeatures;
     private final MenuCatalogueCache            catalogueCache;
     private final MenuMetrics                   metrics;
 
@@ -46,64 +53,46 @@ public class MenuResolutionService {
                               String locale) {
     }
 
-    // ── Roles and privileges ───────────────────────────────────────────────
+    // ── Privileges ─────────────────────────────────────────────────────────
 
     /**
-     * The roles in force for a user right now, with inherited parent roles
-     * folded in. Falls back to the {@code users.role} cache for users that
-     * predate {@code user_roles}.
+     * Privilege codes the user holds in their tenant, in the authorization model's
+     * codes. A platform superadmin holds every privilege ({@code "*"}); a user whose
+     * membership is missing or not active holds none.
      */
     @Transactional(readOnly = true)
-    public List<Role> effectiveRoles(TenantUser user) {
-        List<Role> assigned = userRoleAssignmentRepository
-                .findActiveByUserId(user.getId(), Instant.now())
-                .stream()
-                .map(UserRoleAssignment::getRole)
-                .toList();
-
-        if (!assigned.isEmpty()) return expandInherited(assigned);
-
-        if (user.getRole() == null) return List.of();
-        return roleRepository
-                .findFirstByTenantIsNullAndPlatformRoleOrderBySortOrderAsc(user.getRole().roleName())
-                .map(r -> expandInherited(List.of(r)))
-                .orElseGet(List::of);
-    }
-
-    /** Privilege codes the user effectively holds across all their roles. */
-    @Transactional(readOnly = true)
     public Set<String> effectivePrivileges(TenantUser user) {
-        // A platform superadmin is not modelled through the privilege catalogue.
         if (user.getRole() == PlatformRole.SUPERADMIN) return Set.of("*");
-
-        List<UUID> roleIds = effectiveRoles(user).stream().map(Role::getId).toList();
-        return roleIds.isEmpty() ? Set.of()
-                : rolePrivilegeRepository.findPrivilegeCodesByRoleIds(roleIds);
+        return memberPrivileges(user.getTenant().getId(), user.getAuthUserId()).privileges();
     }
 
-    /** Walks {@code parent_role_id} chains, tolerating an accidental cycle. */
-    private static List<Role> expandInherited(List<Role> roles) {
-        Map<UUID, Role> seen = new LinkedHashMap<>();
-        Deque<Role> pending = new ArrayDeque<>(roles);
-        while (!pending.isEmpty()) {
-            Role role = pending.poll();
-            if (role == null || seen.putIfAbsent(role.getId(), role) != null) continue;
-            if (role.getParentRole() != null) pending.add(role.getParentRole());
-        }
-        return List.copyOf(seen.values());
+    private PermissionSet memberPrivileges(UUID tenantId, UUID userSub) {
+        return permissions.forTenant(tenantId, userSub);
     }
 
     // ── Menu resolution ────────────────────────────────────────────────────
 
     /**
      * The caller's menu. The shared catalogue comes from the version-keyed cache;
-     * everything that depends on <em>who</em> is asking (roles, privileges, user
-     * overrides, group membership) is read per request.
+     * everything that depends on <em>who</em> is asking (privileges, user overrides)
+     * is read per request. A user without an active membership gets an empty menu.
      */
     @Transactional(readOnly = true)
     public List<MenuEntry> resolve(MenuContext ctx) {
-        return metrics.observe("menu.resolve", () -> resolve(ctx, catalogueCache.get(ctx.applicationCode(), ctx.tenant().getId())),
-                "application", ctx.applicationCode());
+        return metrics.observe("menu.resolve", () -> {
+            long start = System.nanoTime();
+            log.debug("menu.resolve start app={} tenant={} user={}",
+                    ctx.applicationCode(), ctx.tenant().getId(), ctx.user().getId());
+            MenuCatalogue catalogue = catalogueCache.get(ctx.applicationCode(), ctx.tenant().getId());
+            log.debug("menu.resolve catalogue ready items={} in {} ms", catalogue.items().size(), elapsedMs(start));
+            List<MenuEntry> tree = resolve(ctx, catalogue);
+            log.debug("menu.resolve done entries={} total {} ms", tree.size(), elapsedMs(start));
+            return tree;
+        }, "application", ctx.applicationCode());
+    }
+
+    private static long elapsedMs(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000;
     }
 
     /**
@@ -116,9 +105,14 @@ public class MenuResolutionService {
     }
 
     private List<MenuEntry> resolve(MenuContext ctx, MenuCatalogue catalogue) {
-        Set<UUID> roleIds = effectiveRoles(ctx.user()).stream()
-                .map(Role::getId)
-                .collect(Collectors.toSet());
+        boolean allPrivileges = ctx.user().getRole() == PlatformRole.SUPERADMIN;
+        PermissionSet set = allPrivileges ? null : memberPrivileges(ctx.tenant().getId(), ctx.user().getAuthUserId());
+        if (set != null && set.status() != PermissionSet.Status.ACTIVE) {
+            log.debug("menu.resolve no active membership ({}): empty menu", set.status());
+            return List.of();
+        }
+        Set<String> privileges = allPrivileges ? Set.of() : set.privileges();
+        log.debug("menu.resolve privileges={}", privileges.size());
 
         Instant now = Instant.now();
         Map<UUID, MenuAccessEffect> userOverrides = menuUserAccessRepository
@@ -127,43 +121,28 @@ public class MenuResolutionService {
                 .collect(Collectors.toMap(a -> a.getMenuItem().getId(),
                                           MenuUserAccess::getEffect,
                                           (a, b) -> b));
+        log.debug("menu.resolve userOverrides={}", userOverrides.size());
 
-        Set<UUID> groupIds = userGroupMemberRepository
-                .findActiveGroupIds(ctx.user().getId(), ctx.applicationCode());
-
-        return resolveFor(catalogue, roleIds, ctx.user().getRole() == PlatformRole.SUPERADMIN,
-                userOverrides, groupIds, ctx);
+        return resolveFor(catalogue, privileges, allPrivileges, userOverrides, ctx);
     }
 
     /**
-     * The menu a holder of one role would see, with no user-level overrides.
-     * Used by the admin preview (always uncached); inherited parent roles are folded in.
+     * The menu a holder of one role would see, with no user-level overrides. Used by
+     * the admin preview (always uncached). The role's privileges are its template plus
+     * deltas, limited to what the tenant's type and plan allow.
      */
     @Transactional(readOnly = true)
-    public List<MenuEntry> resolveForRole(Role role, MenuContext ctx) {
-        Set<UUID> roleIds = expandInherited(List.of(role)).stream()
-                .map(Role::getId)
-                .collect(Collectors.toSet());
+    public List<MenuEntry> resolveForRole(AuthzRole role, MenuContext ctx) {
+        Map<AuthzRole, RoleContribution> one = Map.of(role, permissions.contributionOf(role));
+        Set<String> privileges = PermissionCalculator.effective(one.values(), permissions.catalogue(),
+                new Scope(EffectivePermissionService.tenantType(ctx.tenant()), tenantFeatures.enabled(ctx.tenant())));
         return resolveFor(catalogueCache.compileFresh(ctx.applicationCode(), ctx.tenant().getId()),
-                roleIds, false, Map.of(), Set.of(), ctx);
+                privileges, false, Map.of(), ctx);
     }
 
-    private List<MenuEntry> resolveFor(MenuCatalogue catalogue, Set<UUID> roleIds, boolean allPrivileges,
-                                       Map<UUID, MenuAccessEffect> userOverrides, Set<UUID> groupIds,
-                                       MenuContext ctx) {
-        Set<String> privileges = roleIds.isEmpty()
-                ? Set.of()
-                : rolePrivilegeRepository.findPrivilegeCodesByRoleIds(roleIds);
-
-        Set<UUID> groupDenied = new HashSet<>();
-        Set<UUID> groupGranted = new HashSet<>();
-        for (UUID g : groupIds) {
-            groupDenied.addAll(catalogue.groupDenied().getOrDefault(g, Set.of()));
-            groupGranted.addAll(catalogue.groupGranted().getOrDefault(g, Set.of()));
-        }
-
+    private List<MenuEntry> resolveFor(MenuCatalogue catalogue, Set<String> privileges, boolean allPrivileges,
+                                       Map<UUID, MenuAccessEffect> userOverrides, MenuContext ctx) {
         MenuVisibilityPolicy.Subject subject = new MenuVisibilityPolicy.Subject(
-                roleIds,
                 privileges,
                 allPrivileges,
                 ctx.tenant().getType() == null ? null : ctx.tenant().getType().name(),
@@ -171,14 +150,14 @@ public class MenuResolutionService {
                 ctx.enabledFeatures(),
                 userOverrides,
                 catalogue.overrides(),
-                groupDenied,
-                groupGranted,
                 Instant.now());
 
         Set<UUID> visible = catalogue.items().stream()
                 .filter(m -> MenuVisibilityPolicy.evaluate(m, subject) == MenuVisibilityPolicy.Verdict.VISIBLE)
                 .map(CatalogItem::id)
                 .collect(Collectors.toSet());
+        log.debug("menu.resolve visible={} of {} catalogue items, building tree",
+                visible.size(), catalogue.items().size());
 
         return MenuTreeBuilder.build(catalogue.items(), visible, catalogue.overrides(), ctx.locale());
     }

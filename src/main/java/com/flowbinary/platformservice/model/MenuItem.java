@@ -207,11 +207,6 @@ public class MenuItem extends BaseEntity {
     @BatchSize(size = 200)
     @OneToMany(mappedBy = "menuItem", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @Builder.Default
-    private List<MenuRoleAccess> roleAccess = new ArrayList<>();
-
-    @BatchSize(size = 200)
-    @OneToMany(mappedBy = "menuItem", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    @Builder.Default
     private List<MenuPlanAccess> planAccess = new ArrayList<>();
 
     @BatchSize(size = 200)

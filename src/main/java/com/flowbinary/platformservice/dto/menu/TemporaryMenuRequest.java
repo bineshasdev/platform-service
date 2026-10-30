@@ -37,9 +37,10 @@ public record TemporaryMenuRequest(
 
     /**
      * {@code ALL_ELIGIBLE}: everyone who passes the plan, feature and privilege gates.
-     * {@code RESTRICTED} (default): only the listed roles, users and groups.
-     * Users and groups are tenant-scoped, so only a tenant-scope menu may list them.
+     * {@code RESTRICTED} (default): only the listed users. To reach a kind of person, use
+     * {@code ALL_ELIGIBLE} with a required privilege. Users are tenant-scoped, so only a
+     * tenant-scope menu may list them.
      */
-    public record Audience(String mode, Set<String> roles, Set<UUID> users, Set<String> groups) {
+    public record Audience(String mode, Set<UUID> users) {
     }
 }

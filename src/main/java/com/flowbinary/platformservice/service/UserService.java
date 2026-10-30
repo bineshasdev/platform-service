@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.service.LegacyRoleBridge;
 import com.flowbinary.platformservice.config.KeycloakProperties;
 import com.flowbinary.platformservice.dto.user.ResetCredentialRequest;
 import com.flowbinary.platformservice.dto.user.UserCreateRequest;
@@ -47,6 +48,7 @@ public class UserService {
     private final KeycloakProperties        kcProps;
     private final FileStorageService        fileStorageService;
     private final PlatformEventPublisher    eventPublisher;
+    private final LegacyRoleBridge          authzBridge;
 
     // ── Me ─────────────────────────────────────────────────────────────────
 
@@ -145,6 +147,7 @@ public class UserService {
                     .status("ACTIVE")
                     .build();
             user = tenantUserRepository.save(user);
+            authzBridge.onUserCreated(tenant, user.getAuthUserId(), user.getRole());
 
             log.info("User created: email={} tenantId={} kcUserId={}", request.getEmail(), tenant.getId(), kcUserId);
 
@@ -198,6 +201,8 @@ public class UserService {
         applyFieldUpdates(user, request);
 
         user = tenantUserRepository.save(user);
+        if (changedFields.contains("role"))   authzBridge.onUserRoleChanged(tenant, user.getAuthUserId(), user.getRole());
+        if (changedFields.contains("status")) authzBridge.onUserStatusChanged(tenant, user.getAuthUserId(), user.getStatus());
         log.info("User updated: id={} tenantId={} changed={}", userId, tenant.getId(), changedFields);
 
         UserUpdatedEvent updatedEvt = UserUpdatedEvent.builder()
@@ -320,6 +325,7 @@ public class UserService {
         }
 
         tenantUserRepository.delete(user);
+        authzBridge.onUserDeleted(tenant, user.getAuthUserId());
         log.info("Deleted user: id={} email={}", userId, user.getEmail());
 
         UserDeletedEvent deletedEvt = UserDeletedEvent.builder()

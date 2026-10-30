@@ -60,7 +60,7 @@ class MenuOpValidatorTest {
     @Test
     void placementAndTenantTypesMustBeKnown() {
         assertThatCode(() -> MenuOpValidator.validate(0,
-                put().placement("SETTINGS").tenantTypes(Set.of("CLINIC", "PRIVATE_CLINIC")).build(), GLOBAL))
+                put().placement("SETTINGS").tenantTypes(Set.of("CLINIC", "LAB")).build(), GLOBAL))
                 .doesNotThrowAnyException();
         reject(put().placement("SIDEBAR").build(), GLOBAL, "placement");
         reject(put().tenantTypes(Set.of("HOSPITAL")).build(), GLOBAL, "tenantTypes");

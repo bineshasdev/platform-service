@@ -53,23 +53,11 @@ public final class MenuOpValidator {
                 if (op.enabled() == null) throw new MenuDraftException(index, "enabled is required");
             }
             case DELETE_ITEM -> { }
-            case SET_ROLES -> {
-                if (op.roles() == null) throw new MenuDraftException(index, "roles is required (may be empty)");
-            }
             case SET_USER_ACCESS -> {
                 if (scope.isGlobal()) {
                     throw new MenuDraftException(index, "User access is managed in a tenant scope, not the global menu");
                 }
                 if (op.userId() == null) throw new MenuDraftException(index, "userId is required");
-                if (op.effect() != null && !op.effect().equals("GRANT") && !op.effect().equals("DENY")) {
-                    throw new MenuDraftException(index, "effect must be GRANT, DENY or null to clear");
-                }
-            }
-            case SET_GROUP_ACCESS -> {
-                if (scope.isGlobal()) {
-                    throw new MenuDraftException(index, "Groups belong to a tenant; assign them in a tenant scope");
-                }
-                requireCode(index, op.group());
                 if (op.effect() != null && !op.effect().equals("GRANT") && !op.effect().equals("DENY")) {
                     throw new MenuDraftException(index, "effect must be GRANT, DENY or null to clear");
                 }

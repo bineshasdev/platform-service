@@ -25,9 +25,6 @@ public class ClinicRegistrationRequest {
     @Size(max = 100)
     private String displayName;
 
-    /** When true the tenant is created as PRIVATE_CLINIC (solo practice) rather than CLINIC. */
-    private boolean privatePractice;
-
     // ── First admin user ──────────────────────────────────────────────
 
     @NotBlank(message = "Admin first name is required")

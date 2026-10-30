@@ -10,11 +10,10 @@ public record CatalogueItem(String code, String parentCode, String label, String
                             String type, String behavior, String target, String placement, int sortOrder, int depth,
                             boolean enabled, boolean visible, boolean editable,
                             String requiredPrivilege, String requiredFeature,
-                            List<String> roles, List<String> plans,
+                            List<String> plans,
                             /** Tenant types the item applies to; null = every type. */
                             List<String> tenantTypes,
                             Override override,
-                            List<String> groupGrants, List<String> groupDenies,
                             String source, String lifecycleStatus,
                             java.time.Instant startsAt, java.time.Instant endsAt,
                             /** Code of the owning module for a module item; null otherwise. */
