@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.service.PrimaryRoles;
 import com.flowbinary.platformservice.config.AppProperties;
 import com.flowbinary.platformservice.dto.bootstrap.*;
 import com.flowbinary.platformservice.model.*;
@@ -23,6 +24,7 @@ import java.util.stream.Collectors;
 public class BootstrapService {
 
     private final AppProperties                appProperties;
+    private final PrimaryRoles                 primaryRoles;
     private final TenantContextResolver        tenantContextResolver;
     private final TenantUserRepository         tenantUserRepository;
     private final TenantSubscriptionRepository subscriptionRepository;
@@ -82,7 +84,7 @@ public class BootstrapService {
         // ── Build response ─────────────────────────────────────────────────
         return BootstrapResponse.builder()
                 .platform(buildPlatform())
-                .user(buildUser(user, settings, privileges))
+                .user(buildUser(user, primaryRoles.code(tenant.getId(), authUserId), settings, privileges))
                 .tenant(buildTenant(tenant))
                 .branding(buildBranding(tenant, settings))
                 .theme(buildTheme(settings))
@@ -118,14 +120,14 @@ public class BootstrapService {
 
     // ── User ───────────────────────────────────────────────────────────────
 
-    private UserInfo buildUser(TenantUser user, Map<String, String> settings, Set<String> privileges) {
+    private UserInfo buildUser(TenantUser user, String primaryRole, Map<String, String> settings, Set<String> privileges) {
         String fullName = trim(user.getFirstName()) + " " + trim(user.getLastName());
         return UserInfo.builder()
                 .id(user.getAuthUserId().toString())
                 .name(fullName.isBlank() ? user.getEmail() : fullName.trim())
                 .email(user.getEmail())
                 .avatar("/avatars/" + user.getAuthUserId())
-                .role(user.getRole().roleName().toUpperCase())
+                .role(primaryRole == null ? null : primaryRole.toUpperCase())
                 .permissions(privileges.stream().sorted().toList())
                 .preferences(buildPreferences(settings))
                 .build();

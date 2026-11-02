@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.flowbinary.platformservice.dto.bootstrap.MenuEntry;
 import com.flowbinary.platformservice.model.MenuPlacement;
 import com.flowbinary.platformservice.service.MenuQueryService;
@@ -25,6 +26,7 @@ public class MenuController {
     private final MenuQueryService menuQueryService;
 
     @GetMapping("/me")
+    @PreAuthorize("@authz.member(authentication)")
     @Operation(
         summary = "Get my navigation menu",
         description = """

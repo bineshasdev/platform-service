@@ -1,5 +1,7 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.repository.AuthzPrivilegeRepository;
+import com.flowbinary.platformservice.authz.model.AuthzPrivilege;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -57,7 +59,7 @@ public class MenuModuleSyncService {
     private final MenuModuleRepository         modules;
     private final MenuModuleManifestRepository history;
     private final MenuItemRepository           items;
-    private final PrivilegeRepository          privileges;
+    private final AuthzPrivilegeRepository     privileges;
     private final FeatureRepository            features;
     private final MenuHierarchyValidator       hierarchy;
     private final AuditService                 audit;
@@ -67,7 +69,7 @@ public class MenuModuleSyncService {
     private final TransactionTemplate          tx;
 
     public MenuModuleSyncService(MenuModuleRepository modules, MenuModuleManifestRepository history,
-                                 MenuItemRepository items, PrivilegeRepository privileges, FeatureRepository features,
+                                 MenuItemRepository items, AuthzPrivilegeRepository privileges, FeatureRepository features,
                                  MenuHierarchyValidator hierarchy, AuditService audit, MenuCatalogEvents events,
                                  MenuMetrics metrics, AppProperties properties, PlatformTransactionManager txm) {
         this.modules = modules;
@@ -233,7 +235,7 @@ public class MenuModuleSyncService {
         item.setPlacement(v.placement());
         item.setTenantTypes(v.tenantTypes() == null ? null : new ArrayList<>(v.tenantTypes()));
         item.setSeparatorBefore(v.separatorBefore());
-        item.setRequiredPrivilege(v.privilege());
+        item.setRequiredPrivilege(v.privilege() == null ? null : v.privilege().getCode());
         item.setRequiredFeature(v.feature());
         // is_active, sort_order and lifecycle are the administrators' and the module state's, never the manifest's
     }
@@ -244,8 +246,7 @@ public class MenuModuleSyncService {
                 || m.getType() != v.type() || m.getBehavior() != v.behavior() || m.getTarget() != v.target()
                 || m.getPlacement() != v.placement() || !Objects.equals(m.getTenantTypes(), v.tenantTypes())
                 || !Objects.equals(m.getSeparatorBefore(), v.separatorBefore())
-                || !Objects.equals(m.getRequiredPrivilege() == null ? null : m.getRequiredPrivilege().getCode(),
-                                   v.privilege() == null ? null : v.privilege().getCode())
+                || !Objects.equals(m.getRequiredPrivilege(), v.privilege() == null ? null : v.privilege().getCode())
                 || !Objects.equals(m.getRequiredFeature(), v.feature());
     }
 
@@ -368,8 +369,8 @@ public class MenuModuleSyncService {
         List<MenuItem> global = items.findGlobalItems(appId);
         return new MenuManifestValidator.Refs() {
             @Override
-            public Optional<Privilege> privilege(String code) {
-                return privileges.findByCode(code).filter(Privilege::getIsActive);
+            public Optional<AuthzPrivilege> privilege(String code) {
+                return privileges.findById(code).filter(AuthzPrivilege::isActive);
             }
 
             @Override

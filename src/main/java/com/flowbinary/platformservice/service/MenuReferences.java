@@ -1,6 +1,6 @@
 package com.flowbinary.platformservice.service;
 
-import com.flowbinary.platformservice.model.Privilege;
+import com.flowbinary.platformservice.authz.model.AuthzPrivilege;
 import com.flowbinary.platformservice.model.TenantUser;
 
 import java.util.Collection;
@@ -13,7 +13,8 @@ import java.util.UUID;
  */
 public interface MenuReferences {
 
-    Optional<Privilege> privilege(String code);
+    /** A privilege of the authorization model, by its code. */
+    Optional<AuthzPrivilege> privilege(String code);
 
     boolean featureExists(String code);
 

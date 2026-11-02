@@ -184,10 +184,9 @@ public class MenuItem extends BaseEntity {
     @Column(name = "required_feature")
     private String requiredFeature;
 
-    /** Privilege the user must hold for this item to appear. NULL = no privilege gate. */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "required_privilege_id")
-    private Privilege requiredPrivilege;
+    /** Code of the privilege the user must hold for this item to appear. NULL = no privilege gate. */
+    @Column(name = "required_privilege")
+    private String requiredPrivilege;
 
     @Type(JsonBinaryType.class)
     @Column(name = "metadata", columnDefinition = "jsonb")

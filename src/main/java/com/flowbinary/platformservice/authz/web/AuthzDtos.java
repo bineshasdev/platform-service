@@ -60,9 +60,11 @@ public final class AuthzDtos {
         }
     }
 
-    public record MembershipResponse(UUID id, UUID userSub, String status, List<AssignmentResponse> assignments) {
-        static MembershipResponse of(Membership m, List<RoleAssignment> held) {
-            return new MembershipResponse(m.getId(), m.getUserSub(), m.getStatus().name(),
+    /** {@code name} and {@code email} come from the tenant's user directory; null when the user has no profile there. */
+    public record MembershipResponse(UUID id, UUID userSub, String name, String email, String status,
+                                     List<AssignmentResponse> assignments) {
+        static MembershipResponse of(Membership m, List<RoleAssignment> held, String name, String email) {
+            return new MembershipResponse(m.getId(), m.getUserSub(), name, email, m.getStatus().name(),
                     held.stream().map(AssignmentResponse::of).toList());
         }
     }

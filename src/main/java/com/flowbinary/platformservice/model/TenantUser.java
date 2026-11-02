@@ -35,11 +35,6 @@ public class TenantUser extends BaseEntity {
     @Column(name = "auth_user_id", nullable = false)
     private UUID authUserId;
 
-    @Convert(converter = PlatformRoleConverter.class)
-    @Column(name = "role", nullable = false)
-    @Builder.Default
-    private PlatformRole role = PlatformRole.USER;
-
     @Column(name = "email", nullable = false)
     private String email;
 

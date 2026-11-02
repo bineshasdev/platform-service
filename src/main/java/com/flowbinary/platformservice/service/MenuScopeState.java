@@ -94,7 +94,7 @@ public final class MenuScopeState {
         a.put("visible", Boolean.TRUE.equals(m.getIsVisible()));
         a.put("enabled", Boolean.TRUE.equals(m.getIsActive()));
         a.put("sortOrder", m.getSortOrder());
-        a.put("requiredPrivilege", m.getRequiredPrivilege() == null ? null : m.getRequiredPrivilege().getCode());
+        a.put("requiredPrivilege", m.getRequiredPrivilege());
         a.put("requiredFeature", m.getRequiredFeature());
         a.put("plans", m.getPlanAccess().stream().map(p -> p.getId().getPlan().name()).sorted().toList());
         a.put("tenantTypes", m.getTenantTypes() == null ? null : m.getTenantTypes().stream().sorted().toList());

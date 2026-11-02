@@ -46,22 +46,13 @@ public class MenuCatalogueCompiler {
     @Transactional(readOnly = true)
     public MenuCatalogue compile(String applicationCode, UUID tenantId, Versions v) {
         Instant now = Instant.now();
-        Map<String, String> privilegeCodes = legacyPrivilegeCodes();
         List<CatalogItem> compiled = items.findCatalogueSource(applicationCode, tenantId, now).stream()
-                .map(m -> CatalogItem.of(m, privilegeCodes))
+                .map(CatalogItem::of)
                 .toList();
 
         Map<UUID, CatalogOverride> tenantOverrides = new HashMap<>();
         overrides.findByTenantId(tenantId).forEach(o -> tenantOverrides.put(o.getMenuItem().getId(), CatalogOverride.of(o)));
 
         return new MenuCatalogue(compiled, Map.copyOf(tenantOverrides), v.global(), v.tenant(), now);
-    }
-
-    /** Old {@code privileges.code} → the authorization model's code, for the items that still use old codes. */
-    private Map<String, String> legacyPrivilegeCodes() {
-        Map<String, String> out = new HashMap<>();
-        jdbc.query("SELECT legacy_code, code FROM authz_privileges WHERE legacy_code IS NOT NULL",
-                rs -> { out.put(rs.getString(1), rs.getString(2)); });
-        return Map.copyOf(out);
     }
 }

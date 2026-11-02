@@ -1,6 +1,7 @@
 package com.flowbinary.platformservice.service;
 
-import com.flowbinary.platformservice.model.Privilege;
+import com.flowbinary.platformservice.authz.model.AuthzPrivilege;
+import com.flowbinary.platformservice.authz.repository.AuthzPrivilegeRepository;
 import com.flowbinary.platformservice.model.TenantUser;
 import com.flowbinary.platformservice.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -15,15 +16,15 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class MenuReferenceLookup implements MenuReferences {
 
-    private final PrivilegeRepository  privilegeRepository;
+    private final AuthzPrivilegeRepository privilegeRepository;
     private final FeatureRepository    featureRepository;
     private final TenantUserRepository tenantUserRepository;
     private final MenuItemRepository   menuItemRepository;
     private final MenuModuleRepository menuModuleRepository;
 
     @Override
-    public Optional<Privilege> privilege(String code) {
-        return privilegeRepository.findByCode(code).filter(Privilege::getIsActive);
+    public Optional<AuthzPrivilege> privilege(String code) {
+        return privilegeRepository.findById(code).filter(AuthzPrivilege::isActive);
     }
 
     @Override

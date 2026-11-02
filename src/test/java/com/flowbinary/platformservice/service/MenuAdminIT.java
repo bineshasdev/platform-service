@@ -1,11 +1,14 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.sdk.PermissionCache;
+import com.flowbinary.platformservice.authz.service.EffectivePermissionService;
+import com.flowbinary.platformservice.authz.service.Operators;
+import com.flowbinary.platformservice.authz.service.TenantFeatures;
 import com.flowbinary.platformservice.config.AppProperties;
 import com.flowbinary.platformservice.config.JpaConfig;
 import com.flowbinary.platformservice.dto.bootstrap.MenuEntry;
 import com.flowbinary.platformservice.dto.menu.DraftOpsRequest;
 import com.flowbinary.platformservice.dto.menu.DraftResponse;
-import com.flowbinary.platformservice.dto.menu.GroupRequest;
 import com.flowbinary.platformservice.dto.menu.PreviewRequest;
 import com.flowbinary.platformservice.dto.menu.TemporaryMenuRequest;
 import com.flowbinary.platformservice.dto.menu.TemporaryMenuRequest.Audience;
@@ -54,7 +57,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Import({JpaConfig.class, AppProperties.class, MenuScopeLoader.class, MenuChangeApplier.class,
         MenuHierarchyValidator.class, MenuReferenceLookup.class, MenuDraftService.class, MenuPublishService.class,
         MenuPreviewService.class, MenuCatalogueService.class, AuditService.class, MenuAdminAccess.class,
-        MenuResolutionService.class, MenuQueryService.class, UserGroupService.class, TemporaryMenuService.class, TemporaryMenuLifecycleService.class,
+        MenuResolutionService.class, MenuQueryService.class, EffectivePermissionService.class, TenantFeatures.class, PermissionCache.class, Operators.class, TemporaryMenuService.class, TemporaryMenuLifecycleService.class,
         MenuCatalogueCache.class, MenuCatalogueCompiler.class, MenuMetrics.class, MenuCatalogEvents.class, SettingsResolver.class, TenantContextResolver.class})
 class MenuAdminIT {
 
@@ -74,13 +77,13 @@ class MenuAdminIT {
     @Autowired MenuPreviewService preview;
     @Autowired MenuCatalogueService catalogue;
     @Autowired MenuQueryService menuQuery;
+    @Autowired PermissionCache permissionCache;
     @Autowired MenuReferences refs;
     @Autowired MenuResolutionService resolution;
     @Autowired TenantRepository tenants;
     @Autowired TenantUserRepository users;
     @Autowired MenuItemRepository items;
     @Autowired AuditLogRepository auditLogs;
-    @Autowired UserGroupService groups;
     @Autowired TemporaryMenuService temps;
     @Autowired TemporaryMenuLifecycleService lifecycle;
 
@@ -97,8 +100,9 @@ class MenuAdminIT {
     private Person person(String platformRole, String tenantSlug, String orgId, UUID tenantId) {
         UUID auth = UUID.randomUUID();
         UUID uid = UUID.randomUUID();
-        jdbc.update("INSERT INTO users (id, tenant_id, auth_user_id, role, email, username) VALUES (?,?,?,?,?,?)",
-                uid, tenantId, auth, platformRole, auth + "@t.test", "u" + uid.toString().substring(0, 8));
+        jdbc.update("INSERT INTO users (id, tenant_id, auth_user_id, email, username) VALUES (?,?,?,?,?)",
+                uid, tenantId, auth, auth + "@t.test", "u" + uid.toString().substring(0, 8));
+        AuthzTestSupport.addMember(jdbc, tenantId, auth, platformRole);
         return new Person(auth, uid, orgId, tenantId);
     }
 
@@ -119,9 +123,9 @@ class MenuAdminIT {
         return p + UUID.randomUUID().toString().substring(0, 6);
     }
 
-    private static MenuOp put(String code, String parent, String label, String route, String type, Set<String> roles) {
+    private static MenuOp put(String code, String parent, String label, String route, String type) {
         return MenuOp.builder().op(MenuOpType.PUT_ITEM).code(code).parentCode(parent).label(label).route(route)
-                .type(type).roles(roles).build();
+                .type(type).build();
     }
 
     private AdminContext ctx(Person p, ScopeKind kind, UUID tenantId) {
@@ -144,36 +148,6 @@ class MenuAdminIT {
     // ── tests ──────────────────────────────────────────────────────────────
 
     @Test
-    void catalogueRolesHoldTheNewPrivilegesTheCatalogueGivesThem() {
-        Map<String, Set<String>> expected = Map.of(
-                "OWNER",  Set.of("schedule.manage", "referral.view", "referral.manage", "telehealth.consult", "lab.sample.manage",
-                                 "lab.catalog.manage", "pharmacy.inventory.manage", "data.import", "data.export"),
-                "MANAGER", Set.of("schedule.manage"),
-                "CLINIC_ADMIN", Set.of("schedule.manage", "referral.view", "data.import"),
-                "DOCTOR", Set.of("referral.view", "referral.manage", "telehealth.consult"),
-                "NURSE", Set.of("referral.view"),
-                "LAB_ADMIN", Set.of("lab.sample.manage", "lab.catalog.manage"),
-                "LAB_TECHNICIAN", Set.of("lab.sample.manage"),
-                "PHLEBOTOMIST", Set.of("lab.sample.manage"),
-                "PHARMACIST", Set.of("pharmacy.inventory.manage"));
-        Set<String> all = expected.get("OWNER");
-        expected.forEach((role, granted) -> {
-            Set<String> held = new java.util.HashSet<>(jdbc.queryForList(
-                    "SELECT p.code FROM role_privileges rp JOIN roles r ON r.id=rp.role_id AND r.tenant_id IS NULL "
-                            + "JOIN privileges p ON p.id=rp.privilege_id WHERE r.code=? AND p.code = ANY(?)",
-                    String.class, role, all.toArray(String[]::new)));
-            assertThat(held).as(role).isEqualTo(granted);
-        });
-        // ADMIN matches OWNER; roles not listed hold none of them
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM role_privileges rp JOIN roles r ON r.id=rp.role_id AND r.code='ADMIN' "
-                + "JOIN privileges p ON p.id=rp.privilege_id WHERE p.code = ANY(?)", Integer.class, (Object) all.toArray(String[]::new)))
-                .isEqualTo(all.size());
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM role_privileges rp JOIN roles r ON r.id=rp.role_id "
-                + "JOIN privileges p ON p.id=rp.privilege_id WHERE r.code IN ('RECEPTIONIST','BILLING_STAFF','MEDICAL_CODER','COMPLIANCE_OFFICER','PATIENT','VIEWER','USER') "
-                + "AND p.code = ANY(?)", Integer.class, (Object) all.toArray(String[]::new))).isZero();
-    }
-
-    @Test
     void tenantTypeGateAndPlacementFilter() {
         String clinicOrg = UUID.randomUUID().toString(), labOrg = UUID.randomUUID().toString();
         UUID clinic = tenant(uniq("c"), clinicOrg), lab = tenant(uniq("l"), labOrg);
@@ -185,9 +159,9 @@ class MenuAdminIT {
         String hub = uniq("hub"), page = uniq("page"), labOnly = uniq("labonly");
 
         AdminContext g = ctx(operator, ScopeKind.GLOBAL, null);
-        draft(g, put(hub, null, "Hub", "/" + hub, "LINK", Set.of("DOCTOR")),
-                 put(page, hub, "Page", "/" + hub + "/page", "LINK", Set.of("DOCTOR")).toBuilder().placement("SETTINGS").build(),
-                 put(labOnly, null, "Lab only", "/" + labOnly, "LINK", Set.of("DOCTOR")).toBuilder().tenantTypes(Set.of("LAB")).build());
+        draft(g, put(hub, null, "Hub", "/" + hub, "LINK"),
+                 put(page, hub, "Page", "/" + hub + "/page", "LINK").toBuilder().placement("SETTINGS").build(),
+                 put(labOnly, null, "Lab only", "/" + labOnly, "LINK").toBuilder().tenantTypes(Set.of("LAB")).build());
         publish.publish(g, "8a");
 
         assertThat(codes(menuQuery.menuFor(auth(clinicDoc), "PROVIDER_CONSOLE"))).contains(hub, page).doesNotContain(labOnly);
@@ -211,7 +185,7 @@ class MenuAdminIT {
         // a tenant admin cannot gate their own items by tenant type
         Person clinicAdmin = person("clinic_admin", "x", clinicOrg, clinic);
         assertThatThrownBy(() -> draft(ctx(clinicAdmin, ScopeKind.TENANT, null),
-                put(uniq("own"), null, "Own", "/own", "LINK", Set.of("DOCTOR")).toBuilder().tenantTypes(Set.of("LAB")).build()))
+                put(uniq("own"), null, "Own", "/own", "LINK").toBuilder().tenantTypes(Set.of("LAB")).build()))
                 .isInstanceOf(MenuDraftException.class).hasMessageContaining("global items");
     }
 
@@ -224,8 +198,8 @@ class MenuAdminIT {
         String grp = uniq("grp"), kid = uniq("kid");
 
         AdminContext g = ctx(operator, ScopeKind.GLOBAL, null);
-        draft(g, put(grp, null, "Group", null, "GROUP", Set.of("DOCTOR")),
-                 put(kid, grp, "Kid", "/kid", "LINK", Set.of("DOCTOR")));
+        draft(g, put(grp, null, "Group", null, "GROUP"),
+                 put(kid, grp, "Kid", "/kid", "LINK"));
 
         // draft only: nothing live yet
         assertThat(items.findByApplicationCodeAndCode("PROVIDER_CONSOLE", kid)).isEmpty();
@@ -269,7 +243,7 @@ class MenuAdminIT {
         String mine = uniq("mine");
 
         AdminContext c1 = ctx(admin1, ScopeKind.TENANT, null);
-        draft(c1, put(mine, null, "Mine", "/mine", "LINK", Set.of("DOCTOR")));
+        draft(c1, put(mine, null, "Mine", "/mine", "LINK"));
         publish.publish(c1, null);
 
         assertThat(codes(menuQuery.menuFor(auth(staff1), "PROVIDER_CONSOLE"))).contains(mine);
@@ -285,7 +259,7 @@ class MenuAdminIT {
     }
 
     @Test
-    void tenantCannotEditGlobalItemsOrGrantSystemRolesOnThem() {
+    void tenantCannotEditPlatformItems() {
         String org = UUID.randomUUID().toString();
         UUID t = tenant(uniq("c"), org);
         Person admin = person("clinic_admin", "x", org, t);
@@ -295,8 +269,6 @@ class MenuAdminIT {
                 .isInstanceOf(MenuDraftException.class).hasMessageContaining("platform item");
         assertThatThrownBy(() -> draft(c, MenuOp.builder().op(MenuOpType.DELETE_ITEM).code("fx_dash").build()))
                 .isInstanceOf(MenuDraftException.class);
-        assertThatThrownBy(() -> draft(c, MenuOp.builder().op(MenuOpType.SET_ROLES).code("fx_dash").roles(Set.of("VIEWER")).build()))
-                .isInstanceOf(MenuDraftException.class).hasMessageContaining("System roles");
         // unrelated rows untouched
         assertThat(jdbc.queryForObject("SELECT label FROM menu_items WHERE code='fx_dash'", String.class))
                 .isNotEqualTo("Hacked");
@@ -327,20 +299,20 @@ class MenuAdminIT {
         String a = uniq("a"), b = uniq("b"), cc = uniq("c"), d = uniq("d"), e = uniq("e");
 
         // bad route / injection
-        assertThatThrownBy(() -> draft(c, put(uniq("x"), null, "X", "javascript:alert(1)", "LINK", Set.of())))
+        assertThatThrownBy(() -> draft(c, put(uniq("x"), null, "X", "javascript:alert(1)", "LINK")))
                 .isInstanceOf(MenuDraftException.class).hasMessageContaining("route");
-        assertThatThrownBy(() -> draft(c, put(uniq("x"), null, "X", "//evil.example", "LINK", Set.of())))
+        assertThatThrownBy(() -> draft(c, put(uniq("x"), null, "X", "//evil.example", "LINK")))
                 .isInstanceOf(MenuDraftException.class);
         // unknown parent
-        assertThatThrownBy(() -> draft(c, put(uniq("x"), "nope-" + a, "X", "/x", "LINK", Set.of())))
+        assertThatThrownBy(() -> draft(c, put(uniq("x"), "nope-" + a, "X", "/x", "LINK")))
                 .isInstanceOf(MenuDraftException.class);
         // 5 levels deep
-        assertThatThrownBy(() -> draft(c, put(a, null, "A", "/a", "LINK", Set.of()),
-                put(b, a, "B", "/b", "LINK", Set.of()), put(cc, b, "C", "/c", "LINK", Set.of()),
-                put(d, cc, "D", "/d", "LINK", Set.of()), put(e, d, "E", "/e", "LINK", Set.of())))
+        assertThatThrownBy(() -> draft(c, put(a, null, "A", "/a", "LINK"),
+                put(b, a, "B", "/b", "LINK"), put(cc, b, "C", "/c", "LINK"),
+                put(d, cc, "D", "/d", "LINK"), put(e, d, "E", "/e", "LINK")))
                 .isInstanceOf(MenuDraftException.class).hasMessageContaining("levels deep");
         // a code that equals a global one
-        assertThatThrownBy(() -> draft(c, put("fx_dash", null, "Dup", "/dup", "LINK", Set.of())))
+        assertThatThrownBy(() -> draft(c, put("fx_dash", null, "Dup", "/dup", "LINK")))
                 .isInstanceOf(MenuDraftException.class);
         // nothing was stored
         assertThat(drafts.current(c)).isEmpty();
@@ -353,7 +325,7 @@ class MenuAdminIT {
         AdminContext c = ctx(person("clinic_admin", "x", org, t), ScopeKind.TENANT, null);
         String a = uniq("a"), b = uniq("b");
         assertThatThrownBy(() -> draft(c,
-                put(a, null, "A", "/a", "LINK", Set.of()), put(b, a, "B", "/b", "LINK", Set.of()),
+                put(a, null, "A", "/a", "LINK"), put(b, a, "B", "/b", "LINK"),
                 MenuOp.builder().op(MenuOpType.MOVE_ITEM).code(a).parentCode(b).build()))
                 .isInstanceOf(MenuDraftException.class).hasMessageContaining("cycle");
     }
@@ -364,7 +336,7 @@ class MenuAdminIT {
         UUID t = tenant(uniq("i"), org);
         Person admin = person("clinic_admin", "x", org, t);
         AdminContext c = ctx(admin, ScopeKind.TENANT, null);
-        DraftResponse d = draft(c, put(uniq("p"), null, "P", "/p", "LINK", Set.of()));
+        DraftResponse d = draft(c, put(uniq("p"), null, "P", "/p", "LINK"));
 
         // simulate an out-of-band publish by bumping the scope version
         jdbc.update("INSERT INTO menu_snapshots (application_id, tenant_id, version, state) " +
@@ -377,9 +349,9 @@ class MenuAdminIT {
 
         // appending without the current rowVersion is refused
         // the draft was published, so this starts a fresh one...
-        drafts.append(c, new DraftOpsRequest(null, null, List.of(put(uniq("q"), null, "Q", "/q", "LINK", Set.of()))));
+        drafts.append(c, new DraftOpsRequest(null, null, List.of(put(uniq("q"), null, "Q", "/q", "LINK"))));
         // ...and a second append that does not carry its rowVersion is refused
-        assertThatThrownBy(() -> drafts.append(c, new DraftOpsRequest(null, null, List.of(put(uniq("r"), null, "R", "/r", "LINK", Set.of())))))
+        assertThatThrownBy(() -> drafts.append(c, new DraftOpsRequest(null, null, List.of(put(uniq("r"), null, "R", "/r", "LINK")))))
                 .isInstanceOf(MenuConflictException.class);
         assertThat(d.id()).isNotNull();
     }
@@ -392,11 +364,11 @@ class MenuAdminIT {
         Person doc = person("doctor", "x", org, t);
         AdminContext c = ctx(admin, ScopeKind.TENANT, null);
         String code = uniq("pv");
-        draft(c, put(code, null, "Preview me", "/pv", "LINK", Set.of("DOCTOR")));
+        draft(c, put(code, null, "Preview me", "/pv", "LINK"));
 
         var withDraft = preview.preview(c, new PreviewRequest(doc.userId(), null, true, null));
         var without = preview.preview(c, new PreviewRequest(doc.userId(), null, false, null));
-        var asRole = preview.preview(c, new PreviewRequest(null, "DOCTOR", true, null));
+        var asRole = preview.preview(c, new PreviewRequest(null, "doctor", true, null));
 
         assertThat(withDraft.usedDraft()).isTrue();
         assertThat(codes(withDraft.menu())).contains(code);
@@ -420,9 +392,9 @@ class MenuAdminIT {
         AdminContext c = ctx(admin, ScopeKind.TENANT, null);
         String keep = uniq("keep"), added = uniq("add");
 
-        draft(c, put(keep, null, "Keep", "/keep", "LINK", Set.of("DOCTOR")));
+        draft(c, put(keep, null, "Keep", "/keep", "LINK"));
         publish.publish(c, "v1");                                           // v1
-        draft(c, put(added, null, "Added", "/added", "LINK", Set.of("DOCTOR")),
+        draft(c, put(added, null, "Added", "/added", "LINK"),
                 MenuOp.builder().op(MenuOpType.PATCH_ITEM).code(keep).label("Renamed").build());
         publish.publish(c, "v2");                                           // v2
         assertThat(jdbc.queryForObject("SELECT label FROM menu_items WHERE code=?", String.class, keep)).isEqualTo("Renamed");
@@ -467,132 +439,78 @@ class MenuAdminIT {
         assertThatThrownBy(() -> drafts.current(viewer)).isInstanceOf(AccessDeniedException.class);
     }
 
-    // ── groups ─────────────────────────────────────────────────────────────
+    // ── navigation follows privileges ──────────────────────────────────────
 
-    private void group(AdminContext c, String code, UUID... members) {
-        groups.create(c, new GroupRequest(code, code, null, null));
-        if (members.length > 0) groups.addMembers(c, code, new HashSet<>(Arrays.asList(members)));
-    }
+    @Test
+    void ungatedItemsShowToEveryActiveMemberAndGatedOnesOnlyToHolders() {
+        String org = UUID.randomUUID().toString();
+        UUID t = tenant(uniq("pv"), org);
+        Person admin = person("clinic_admin", "x", org, t), doc = person("doctor", "x", org, t);
 
-    private static MenuOp groupOp(String item, String group, String effect) {
-        return MenuOp.builder().op(MenuOpType.SET_GROUP_ACCESS).code(item).group(group).effect(effect).build();
+        // fx_dash needs nothing; fx_admin_users needs platform.member.manage.
+        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).contains("fx_dash").doesNotContain("fx_admin_users");
+        assertThat(codes(menuQuery.menuFor(auth(admin), "PROVIDER_CONSOLE"))).contains("fx_dash", "fx_admin_users");
     }
 
     @Test
-    void groupGrantShowsItemAndAnyDenyBeatsAUserGrant() {
+    void aMemberWhoIsNotActiveSeesNothingAndComesBackWithTheirRoles() {
         String org = UUID.randomUUID().toString();
-        UUID t = tenant(uniq("g1"), org);
+        UUID t = tenant(uniq("sp"), org);
+        Person doc = person("doctor", "x", org, t);
+        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).contains("fx_dash");
+
+        // permission sets are cached for up to a minute and dropped by change events; this test goes
+        // to the database directly, so it drops the entry itself
+        jdbc.update("UPDATE authz_memberships SET status='SUSPENDED' WHERE tenant_id=? AND user_sub=?", t, doc.authId());
+        permissionCache.invalidate(t, doc.authId());
+        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).isEmpty();
+        jdbc.update("UPDATE authz_memberships SET status='ACTIVE' WHERE tenant_id=? AND user_sub=?", t, doc.authId());
+        permissionCache.invalidate(t, doc.authId());
+        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).contains("fx_dash");
+    }
+
+    @Test
+    void userGrantShowsWhatTheTenantHidButNeverBypassesAGate() {
+        String org = UUID.randomUUID().toString();
+        UUID t = tenant(uniq("ug"), org);
         Person admin = person("clinic_admin", "x", org, t);
-        Person doc = person("doctor", "x", org, t);
+        Person doc = person("doctor", "x", org, t), other = person("doctor", "x", org, t);
         AdminContext c = ctx(admin, ScopeKind.TENANT, null);
-        String item = uniq("secret"), allow = uniq("allow"), block = uniq("block");
 
-        // an item nobody's role grants
-        draft(c, put(item, null, "Secret", "/secret", "LINK", Set.of()));
+        // the tenant hides fx_dash for everyone; one doctor gets it back
+        draft(c, MenuOp.builder().op(MenuOpType.SET_OVERRIDE).code("fx_dash").hidden(true).build(),
+                MenuOp.builder().op(MenuOpType.SET_USER_ACCESS).code("fx_dash").userId(doc.userId()).effect("GRANT").build(),
+                // a GRANT on a privilege-gated item does not help someone who lacks the privilege
+                MenuOp.builder().op(MenuOpType.SET_USER_ACCESS).code("fx_admin_users").userId(doc.userId()).effect("GRANT").build());
         publish.publish(c, null);
-        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).doesNotContain(item);
 
-        group(c, allow, doc.userId());
-        draft(c, groupOp(item, allow, "GRANT"));
-        publish.publish(c, null);
-        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).contains(item);
-
-        // a second group denies it, and the user is also granted it directly: deny still wins
-        group(c, block, doc.userId());
-        draft(c, groupOp(item, block, "DENY"),
-                MenuOp.builder().op(MenuOpType.SET_USER_ACCESS).code(item).userId(doc.userId()).effect("GRANT").build());
-        publish.publish(c, null);
-        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).doesNotContain(item);
-
-        // removing the member lifts the deny
-        groups.removeMember(c, block, doc.userId());
-        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).contains(item);
+        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).contains("fx_dash").doesNotContain("fx_admin_users");
+        assertThat(codes(menuQuery.menuFor(auth(other), "PROVIDER_CONSOLE"))).doesNotContain("fx_dash");
     }
 
     @Test
-    void groupGrantCannotBypassPrivilegeGate() {
+    void aUserDenyHidesAnItemThePrivilegeAllows() {
         String org = UUID.randomUUID().toString();
-        UUID t = tenant(uniq("g2"), org);
-        AdminContext c = ctx(person("clinic_admin", "x", org, t), ScopeKind.TENANT, null);
-        Person doc = person("doctor", "x", org, t);
-        String g = uniq("g");
-
-        group(c, g, doc.userId());
-        draft(c, groupOp("fx_admin_users", g, "GRANT"));       // fx_admin_users needs user.manage, a doctor lacks it
+        UUID t = tenant(uniq("ud"), org);
+        Person admin = person("clinic_admin", "x", org, t);
+        AdminContext c = ctx(admin, ScopeKind.TENANT, null);
+        draft(c, MenuOp.builder().op(MenuOpType.SET_USER_ACCESS).code("fx_admin_users").userId(admin.userId()).effect("DENY").build());
         publish.publish(c, null);
-        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).doesNotContain("fx_admin_users");
+        assertThat(codes(menuQuery.menuFor(auth(admin), "PROVIDER_CONSOLE"))).contains("fx_dash").doesNotContain("fx_admin_users");
     }
 
     @Test
-    void groupsAreTenantOwned() {
-        String org1 = UUID.randomUUID().toString(), org2 = UUID.randomUUID().toString();
-        UUID t1 = tenant(uniq("g3"), org1), t2 = tenant(uniq("g4"), org2);
-        AdminContext c1 = ctx(person("clinic_admin", "x", org1, t1), ScopeKind.TENANT, null);
-        AdminContext c2 = ctx(person("clinic_admin", "x", org2, t2), ScopeKind.TENANT, null);
-        Person u2 = person("doctor", "x", org2, t2);
-        String shared = uniq("recep"), only2 = uniq("only2");
+    void previewAsARoleShowsWhatItsPrivilegesUnlock() {
+        String org = UUID.randomUUID().toString();
+        UUID t = tenant(uniq("pr"), org);
+        AdminContext c = ctx(person("clinic_admin", "x", org, t), ScopeKind.TENANT, null);
 
-        group(c1, shared);
-        group(c2, shared);                                   // same code in another tenant is fine
-        group(c2, only2);
-
-        assertThat(groups.list(c1)).extracting("code").contains(shared).doesNotContain(only2);
-        // tenant 1 cannot target tenant 2's group in a draft, nor add tenant 2's user
-        assertThatThrownBy(() -> draft(c1, groupOp("fx_dash", only2, "GRANT")))
-                .isInstanceOf(MenuDraftException.class).hasMessageContaining("not found");
-        assertThatThrownBy(() -> groups.addMembers(c1, shared, Set.of(u2.userId())))
+        var asAdmin = preview.preview(c, new PreviewRequest(null, "clinic_admin", false, null));
+        var asDoctor = preview.preview(c, new PreviewRequest(null, "doctor", false, null));
+        assertThat(codes(asAdmin.menu())).contains("fx_dash", "fx_admin_users");
+        assertThat(codes(asDoctor.menu())).contains("fx_dash").doesNotContain("fx_admin_users");
+        assertThatThrownBy(() -> preview.preview(c, new PreviewRequest(null, "no_such_role", false, null)))
                 .isInstanceOf(NoSuchElementException.class);
-        assertThatThrownBy(() -> groups.members(c1, only2)).isInstanceOf(NoSuchElementException.class);
-        assertThatThrownBy(() -> groups.create(c1, new GroupRequest(shared, "dup", null, null)))
-                .isInstanceOf(MenuConflictException.class);
-    }
-
-    @Test
-    void groupInUseCannotBeDeletedAndGlobalScopeRejectsGroupOps() {
-        String org = UUID.randomUUID().toString();
-        UUID t = tenant(uniq("g5"), org);
-        AdminContext c = ctx(person("clinic_admin", "x", org, t), ScopeKind.TENANT, null);
-        String g = uniq("g");
-        group(c, g);
-        draft(c, groupOp("fx_dash", g, "GRANT"));
-        publish.publish(c, null);
-
-        assertThatThrownBy(() -> groups.delete(c, g)).isInstanceOf(MenuConflictException.class);
-        draft(c, groupOp("fx_dash", g, null));            // clear it, publish, then delete works
-        publish.publish(c, null);
-        groups.delete(c, g);
-        assertThat(groups.list(c)).extracting("code").doesNotContain(g);
-
-        Person operator = person("superadmin", "x", org, t);
-        AdminContext global = ctx(operator, ScopeKind.GLOBAL, null);
-        assertThatThrownBy(() -> draft(global, groupOp("fx_dash", "any", "GRANT")))
-                .isInstanceOf(MenuDraftException.class).hasMessageContaining("tenant");
-        assertThatThrownBy(() -> groups.list(global)).isInstanceOf(AccessDeniedException.class);
-    }
-
-    @Test
-    void rollbackRestoresGroupAssignmentsAndMembershipChangesAreAudited() {
-        String org = UUID.randomUUID().toString();
-        UUID t = tenant(uniq("g6"), org);
-        AdminContext c = ctx(person("clinic_admin", "x", org, t), ScopeKind.TENANT, null);
-        Person doc = person("doctor", "x", org, t);
-        String g = uniq("g"), item = uniq("it");
-
-        draft(c, put(item, null, "It", "/it", "LINK", Set.of()));
-        publish.publish(c, "v1");
-        group(c, g, doc.userId());
-        draft(c, groupOp(item, g, "GRANT"));
-        publish.publish(c, "v2");
-        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).contains(item);
-
-        publish.rollback(c, 1);
-        publish.publish(c, "back");
-        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).doesNotContain(item);
-
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_type='USER_GROUP_MEMBER' AND tenant_id=?",
-                Integer.class, t)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_type='MENU_GROUP_ACCESS' AND tenant_id=?",
-                Integer.class, t)).isEqualTo(2);   // created in v2, removed by the rollback
     }
 
     // ── temporary menus ────────────────────────────────────────────────────
@@ -602,8 +520,8 @@ class MenuAdminIT {
                 starts, ends, null, null, null, a);
     }
 
-    private static Audience roles(String... r) {
-        return new Audience("RESTRICTED", new HashSet<>(Arrays.asList(r)), null, null);
+    private static Audience everyone() {
+        return new Audience("ALL_ELIGIBLE", null);
     }
 
     /** Moves a menu's window, standing in for the passage of time. */
@@ -633,7 +551,7 @@ class MenuAdminIT {
         String code = uniq("promo");
         Instant now = Instant.now();
 
-        var created = temps.create(c, tmp(code, null, now.plus(Duration.ofHours(1)), now.plus(Duration.ofHours(2)), roles("DOCTOR")));
+        var created = temps.create(c, tmp(code, null, now.plus(Duration.ofHours(1)), now.plus(Duration.ofHours(2)), everyone()));
         assertThat(created.status()).isEqualTo("SCHEDULED");
         assertThat(created.live()).isFalse();
         assertThat(sees(doc, code)).isFalse();                       // before the start
@@ -655,14 +573,14 @@ class MenuAdminIT {
         String a = uniq("act"), e = uniq("exp");
         Instant now = Instant.now();
 
-        temps.create(c, tmp(a, null, now.plus(Duration.ofHours(1)), now.plus(Duration.ofHours(3)), roles("DOCTOR")));
+        temps.create(c, tmp(a, null, now.plus(Duration.ofHours(1)), now.plus(Duration.ofHours(3)), everyone()));
         shift(a, now.minus(Duration.ofMinutes(5)), now.plus(Duration.ofHours(1)));
         lifecycle.transitionDue(Instant.now());
         assertThat(status(a)).isEqualTo("ACTIVE");
         assertThat(auditCount("MENU_TEMP_ACTIVATED", a)).isEqualTo(1);
 
         // a window that opened and closed unseen goes straight to EXPIRED, and two instances racing audit it once
-        temps.create(c, tmp(e, null, now.plus(Duration.ofHours(1)), now.plus(Duration.ofHours(2)), roles("DOCTOR")));
+        temps.create(c, tmp(e, null, now.plus(Duration.ofHours(1)), now.plus(Duration.ofHours(2)), everyone()));
         shift(e, now.minus(Duration.ofHours(2)), now.minus(Duration.ofMinutes(1)));
         ExecutorService pool = Executors.newFixedThreadPool(4);
         List<Future<Integer>> runs = new ArrayList<>();
@@ -688,7 +606,7 @@ class MenuAdminIT {
         String code = uniq("rev");
         Instant now = Instant.now();
 
-        temps.create(c, tmp(code, null, null, now.plus(Duration.ofHours(1)), roles("DOCTOR")));
+        temps.create(c, tmp(code, null, null, now.plus(Duration.ofHours(1)), everyone()));
         assertThat(sees(doc, code)).isTrue();
 
         shift(code, now.minus(Duration.ofHours(2)), now.minus(Duration.ofHours(1)));
@@ -696,14 +614,14 @@ class MenuAdminIT {
         assertThat(status(code)).isEqualTo("EXPIRED");
         assertThat(temps.list(c, MenuLifecycle.EXPIRED)).extracting("code").contains(code);
 
-        var revived = temps.update(c, code, tmp(code, null, null, Instant.now().plus(Duration.ofDays(1)), roles("DOCTOR")));
+        var revived = temps.update(c, code, tmp(code, null, null, Instant.now().plus(Duration.ofDays(1)), everyone()));
         assertThat(revived.status()).isEqualTo("ACTIVE");
         assertThat(sees(doc, code)).isTrue();
 
         assertThat(temps.cancel(c, code, "campaign pulled").status()).isEqualTo("CANCELLED");
         assertThat(sees(doc, code)).isFalse();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM menu_items WHERE code=?", Integer.class, code)).isEqualTo(1);
-        assertThatThrownBy(() -> temps.update(c, code, tmp(code, null, null, Instant.now().plus(Duration.ofDays(1)), roles("DOCTOR"))))
+        assertThatThrownBy(() -> temps.update(c, code, tmp(code, null, null, Instant.now().plus(Duration.ofDays(1)), everyone())))
                 .isInstanceOf(MenuConflictException.class);
         assertThat(jdbc.queryForObject("SELECT reason FROM audit_log WHERE action='MENU_TEMP_CANCELLED' AND entity_id=?",
                 String.class, code)).isEqualTo("campaign pulled");
@@ -728,32 +646,28 @@ class MenuAdminIT {
     }
 
     @Test
-    void audienceRestrictsAndAllEligibleStillRespectsGates() {
+    void audienceIsNamedUsersOrEveryoneEligibleAndGatesStillApply() {
         String org = UUID.randomUUID().toString();
         UUID t = tenant(uniq("tm5"), org);
         AdminContext c = ctx(person("clinic_admin", "x", org, t), ScopeKind.TENANT, null);
-        Person doc = person("doctor", "x", org, t), other = person("doctor", "x", org, t), viewer = person("guest", "x", org, t);
-        String byRole = uniq("r"), byUser = uniq("u"), byGroup = uniq("g"), everyone = uniq("all"), gated = uniq("gate"), grp = uniq("grp");
+        Person doc = person("doctor", "x", org, t), other = person("doctor", "x", org, t), admin2 = person("clinic_admin", "x", org, t);
+        String byUser = uniq("u"), all = uniq("all"), gated = uniq("gate");
         Instant end = Instant.now().plus(Duration.ofHours(1));
 
-        temps.create(c, tmp(byRole, null, null, end, roles("DOCTOR")));
-        temps.create(c, tmp(byUser, null, null, end, new Audience("RESTRICTED", null, Set.of(doc.userId()), null)));
-        group(c, grp, doc.userId());
-        temps.create(c, tmp(byGroup, null, null, end, new Audience("RESTRICTED", null, null, Set.of(grp))));
-        temps.create(c, tmp(everyone, null, null, end, new Audience("ALL_ELIGIBLE", null, null, null)));
+        temps.create(c, tmp(byUser, null, null, end, new Audience("RESTRICTED", Set.of(doc.userId()))));
+        temps.create(c, tmp(all, null, null, end, everyone()));
+        // reaching a kind of person: everyone eligible, narrowed by a privilege (platform.member.manage)
         temps.create(c, new TemporaryMenuRequest(gated, gated, null, null, "/" + gated, null, null, null, null, null, null,
-                null, end, "user.manage", null, null, new Audience("ALL_ELIGIBLE", null, null, null)));
+                null, end, "platform.member.manage", null, null, everyone()));
 
-        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).contains(byRole, byUser, byGroup, everyone).doesNotContain(gated);
-        assertThat(codes(menuQuery.menuFor(auth(other), "PROVIDER_CONSOLE"))).contains(byRole, everyone)
-                .doesNotContain(byUser, byGroup);
-        assertThat(codes(menuQuery.menuFor(auth(viewer), "PROVIDER_CONSOLE"))).contains(everyone)
-                .doesNotContain(byRole, byUser, byGroup, gated);
+        assertThat(codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE"))).contains(byUser, all).doesNotContain(gated);
+        assertThat(codes(menuQuery.menuFor(auth(other), "PROVIDER_CONSOLE"))).contains(all).doesNotContain(byUser, gated);
+        assertThat(codes(menuQuery.menuFor(auth(admin2), "PROVIDER_CONSOLE"))).contains(all, gated).doesNotContain(byUser);
 
         // a user from another tenant cannot be targeted
         Person foreign = person("doctor", "x", UUID.randomUUID().toString(), tenant(uniq("tm5b"), UUID.randomUUID().toString()));
         assertThatThrownBy(() -> temps.create(c, tmp(uniq("f"), null, null, end,
-                new Audience("RESTRICTED", null, Set.of(foreign.userId()), null))))
+                new Audience("RESTRICTED", Set.of(foreign.userId())))))
                 .isInstanceOf(MenuDraftException.class).hasMessageContaining("not found");
     }
 
@@ -769,8 +683,8 @@ class MenuAdminIT {
         String global = uniq("glob"), mine = uniq("mine");
         Instant end = Instant.now().plus(Duration.ofHours(1));
 
-        temps.create(g, tmp(global, null, null, end, new Audience("ALL_ELIGIBLE", null, null, null)));
-        temps.create(c1, tmp(mine, null, null, end, new Audience("ALL_ELIGIBLE", null, null, null)));
+        temps.create(g, tmp(global, null, null, end, new Audience("ALL_ELIGIBLE", null)));
+        temps.create(c1, tmp(mine, null, null, end, new Audience("ALL_ELIGIBLE", null)));
 
         assertThat(sees(u1, global)).isTrue();
         assertThat(sees(u2, global)).isTrue();
@@ -784,7 +698,7 @@ class MenuAdminIT {
         assertThat(temps.list(c2, null)).extracting("code").doesNotContain(mine, global);
         // users and groups cannot be targeted from the global scope
         assertThatThrownBy(() -> temps.create(g, tmp(uniq("x"), null, null, end,
-                new Audience("RESTRICTED", null, Set.of(u1.userId()), null))))
+                new Audience("RESTRICTED", Set.of(u1.userId())))))
                 .isInstanceOf(MenuDraftException.class).hasMessageContaining("tenant");
         assertThat(jdbc.queryForObject("SELECT status FROM (SELECT lifecycle_status AS status FROM menu_items WHERE code=?) s",
                 String.class, global)).isEqualTo("ACTIVE");
@@ -801,13 +715,13 @@ class MenuAdminIT {
         String gp = uniq("gp"), own = uniq("own"), kid = uniq("kid"), kid2 = uniq("kid2");
         Instant end = Instant.now().plus(Duration.ofHours(1));
 
-        draft(g, put(gp, null, "Global parent", "/gp", "LINK", Set.of("DOCTOR")));
+        draft(g, put(gp, null, "Global parent", "/gp", "LINK"));
         publish.publish(g, null);
-        draft(c, put(own, null, "Own parent", "/own", "LINK", Set.of("DOCTOR")));
+        draft(c, put(own, null, "Own parent", "/own", "LINK"));
         publish.publish(c, null);
 
-        temps.create(c, tmp(kid, gp, null, end, roles("DOCTOR")));          // under a platform parent
-        temps.create(c, tmp(kid2, own, null, end, roles("DOCTOR")));        // under the tenant's own parent
+        temps.create(c, tmp(kid, gp, null, end, new Audience("RESTRICTED", Set.of(doc.userId()))));          // under a platform parent
+        temps.create(c, tmp(kid2, own, null, end, new Audience("RESTRICTED", Set.of(doc.userId()))));        // under the tenant's own parent
 
         var tree = menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE");
         assertThat(tree.stream().filter(e -> e.getId().equals(gp)).findFirst().orElseThrow().getChildren())
@@ -822,9 +736,9 @@ class MenuAdminIT {
         assertThat(sees(outsider, kid)).isFalse();
 
         // nothing can hang under a temporary menu, and drafts cannot reach one
-        assertThatThrownBy(() -> temps.create(c, tmp(uniq("deep"), kid, null, end, roles("DOCTOR"))))
+        assertThatThrownBy(() -> temps.create(c, tmp(uniq("deep"), kid, null, end, everyone())))
                 .isInstanceOf(MenuDraftException.class).hasMessageContaining("temporary");
-        assertThatThrownBy(() -> draft(c, put(uniq("p"), kid, "P", "/p", "LINK", Set.of())))
+        assertThatThrownBy(() -> draft(c, put(uniq("p"), kid, "P", "/p", "LINK")))
                 .isInstanceOf(MenuDraftException.class).hasMessageContaining("temporary");
         assertThatThrownBy(() -> draft(c, MenuOp.builder().op(MenuOpType.PATCH_ITEM).code(kid).label("x").build()))
                 .isInstanceOf(MenuDraftException.class).hasMessageContaining("temporary");
@@ -840,9 +754,9 @@ class MenuAdminIT {
         Person doc = person("doctor", "x", org, t);
         String perm = uniq("perm"), camp = uniq("camp");
 
-        draft(c, put(perm, null, "Perm", "/perm", "LINK", Set.of("DOCTOR")));
+        draft(c, put(perm, null, "Perm", "/perm", "LINK"));
         publish.publish(c, "v1");
-        temps.create(c, tmp(camp, null, null, Instant.now().plus(Duration.ofHours(1)), roles("DOCTOR")));
+        temps.create(c, tmp(camp, null, null, Instant.now().plus(Duration.ofHours(1)), everyone()));
         draft(c, MenuOp.builder().op(MenuOpType.PATCH_ITEM).code(perm).label("Renamed").build());
         publish.publish(c, "v2");
 
@@ -863,8 +777,8 @@ class MenuAdminIT {
         String a = uniq("a"), b = uniq("b");
         Instant end = Instant.now().plus(Duration.ofHours(1));
 
-        temps.create(c, new TemporaryMenuRequest(a, a, null, null, "/same", null, null, null, 7, 1, null, null, end, null, null, null, roles("DOCTOR")));
-        temps.create(c, new TemporaryMenuRequest(b, b, null, null, "/same", null, null, null, 7, 9, null, null, end, null, null, null, roles("DOCTOR")));
+        temps.create(c, new TemporaryMenuRequest(a, a, null, null, "/same", null, null, null, 7, 1, null, null, end, null, null, null, everyone()));
+        temps.create(c, new TemporaryMenuRequest(b, b, null, null, "/same", null, null, null, 7, 9, null, null, end, null, null, null, everyone()));
 
         List<String> order = codes(menuQuery.menuFor(auth(doc), "PROVIDER_CONSOLE")).stream()
                 .filter(x -> x.equals(a) || x.equals(b)).toList();
@@ -876,7 +790,8 @@ class MenuAdminIT {
         String org = UUID.randomUUID().toString();
         UUID t = tenant(uniq("tm11"), org);
         AdminContext viewer = ctx(person("guest", "x", org, t), ScopeKind.TENANT, null);
-        assertThatThrownBy(() -> temps.create(viewer, tmp(uniq("z"), null, null, Instant.now().plusSeconds(3600), roles("DOCTOR"))))
+        assertThatThrownBy(() -> temps.create(viewer, tmp(uniq("z"), null, null, Instant.now().plusSeconds(3600),
+                new Audience("RESTRICTED", Set.of(UUID.randomUUID())))))
                 .isInstanceOf(AccessDeniedException.class);
         assertThatThrownBy(() -> temps.list(viewer, null)).isInstanceOf(AccessDeniedException.class);
     }

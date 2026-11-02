@@ -1,5 +1,9 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.sdk.PermissionCache;
+import com.flowbinary.platformservice.authz.service.EffectivePermissionService;
+import com.flowbinary.platformservice.authz.service.Operators;
+import com.flowbinary.platformservice.authz.service.TenantFeatures;
 import com.flowbinary.platformservice.config.AppProperties;
 import com.flowbinary.platformservice.config.JpaConfig;
 import com.flowbinary.platformservice.dto.bootstrap.MenuEntry;
@@ -47,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         MenuHierarchyValidator.class, MenuReferenceLookup.class, MenuDraftService.class, MenuPublishService.class,
         MenuPreviewService.class, MenuCatalogueService.class, AuditService.class, MenuAdminAccess.class,
         MenuResolutionService.class, MenuQueryService.class, SettingsResolver.class, TenantContextResolver.class,
-        UserGroupService.class, TemporaryMenuService.class, TemporaryMenuLifecycleService.class,
+        EffectivePermissionService.class, TenantFeatures.class, PermissionCache.class, Operators.class, TemporaryMenuService.class, TemporaryMenuLifecycleService.class,
         MenuCatalogueCache.class, MenuCatalogueCompiler.class, MenuMetrics.class, MenuCatalogEvents.class,
         MenuModuleSyncService.class, MenuModuleRegistryService.class, MenuModulePuller.class,
         MenuModulePullScheduler.class, ModuleIdentity.class})
@@ -80,7 +84,7 @@ class MenuModuleIT {
 
     MenuItFixtures fx;
     AdminContext operator;
-    Person admin, guest;       // a clinic admin holds billing.view; a guest does not
+    Person admin, guest;       // a clinic admin holds platform.subscription.view; a guest does not
     String code, client, prefix;
 
     @BeforeEach
@@ -102,7 +106,7 @@ class MenuModuleIT {
     // ── helpers ────────────────────────────────────────────────────────────
 
     private ModuleRequest request(String url) {
-        return new ModuleRequest(code, "Module " + code, "d", "PROVIDER_CONSOLE", client, url, List.of(prefix), "M10");
+        return new ModuleRequest(code, "Module " + code, "d", "PROVIDER_CONSOLE", client, url, List.of(prefix), "billing");
     }
 
     private void activeModule() {
@@ -120,7 +124,7 @@ class MenuModuleIT {
     }
 
     private String link(String key, String label) {
-        return item(key, null, label, prefix + "/" + key, null, "billing.view");
+        return item(key, null, label, prefix + "/" + key, null, "platform.subscription.view");
     }
 
     private String manifest(String version, String... items) {
@@ -213,7 +217,7 @@ class MenuModuleIT {
                 .isInstanceOf(MenuDraftException.class).hasMessageContaining("private");
         assertThatThrownBy(() -> registry.register(operator,
                 new ModuleRequest(other, "x", null, null, "c6-" + other, null, List.of("/" + other), "M99")))
-                .isInstanceOf(MenuDraftException.class).hasMessageContaining("matches no privilege");
+                .isInstanceOf(MenuDraftException.class).hasMessageContaining("matches no service that owns privileges");
     }
 
     // ── publishing a menu ──────────────────────────────────────────────────
@@ -223,7 +227,7 @@ class MenuModuleIT {
         activeModule();
         SyncResult r = push(manifest("2026.1",
                 item("root", null, "Billing", null, "GROUP", null),
-                item("invoices", "root", "Invoices", prefix + "/invoices", null, "billing.view")));
+                item("invoices", "root", "Invoices", prefix + "/invoices", null, "platform.subscription.view")));
 
         assertThat(r.accepted()).isTrue();
         assertThat(r.created()).isEqualTo(2);
@@ -231,10 +235,8 @@ class MenuModuleIT {
                 String.class, fullCode("invoices"))).isEqualTo("MODULE:global:1");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM menu_plan_access WHERE menu_item_id=(SELECT id FROM menu_items WHERE code=?)",
                 Integer.class, fullCode("invoices"))).isEqualTo(TenantPlan.values().length);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM menu_role_access WHERE menu_item_id=(SELECT id FROM menu_items WHERE code=?)",
-                Integer.class, fullCode("invoices"))).isZero();                    // no role grant is involved
 
-        assertThat(codes(admin)).contains(fullCode("root"), fullCode("invoices"));   // holds billing.view
+        assertThat(codes(admin)).contains(fullCode("root"), fullCode("invoices"));   // holds platform.subscription.view
         assertThat(codes(guest)).doesNotContain(fullCode("root"), fullCode("invoices"));
         assertThat(registry.get(operator, code).health()).isEqualTo("UP");
         assertThat(registry.get(operator, code).currentVersion()).isEqualTo("2026.1");
@@ -247,11 +249,11 @@ class MenuModuleIT {
         long before = globalVersion();
 
         SyncResult bad = push(manifest("2",
-                item("a", null, "A2", "/elsewhere/x", null, "billing.view"),                        // outside prefix
+                item("a", null, "A2", "/elsewhere/x", null, "platform.subscription.view"),                        // outside prefix
                 item("b", null, "B", prefix + "/b", null, null),                                    // no privilege
-                item("c", null, "C", prefix + "/c", null, "lab.order"),                             // someone else's privilege
-                item("d", null, "D", "https://evil.example", "EXTERNAL", "billing.view"),           // external
-                item("e", "ghost", "E", prefix + "/e", null, "billing.view")));                     // unknown parent
+                item("c", null, "C", prefix + "/c", null, "lab.order.create"),                             // someone else's privilege
+                item("d", null, "D", "https://evil.example", "EXTERNAL", "platform.subscription.view"),           // external
+                item("e", "ghost", "E", prefix + "/e", null, "platform.subscription.view")));                     // unknown parent
 
         assertThat(bad.outcome()).isEqualTo(ManifestOutcome.REJECTED);
         assertThat(bad.errors().size()).isGreaterThanOrEqualTo(5);
@@ -283,7 +285,7 @@ class MenuModuleIT {
         assertThat(push("{not json").outcome()).isEqualTo(ManifestOutcome.REJECTED);
         // an unknown field could have been a mistyped restriction, so it is an error
         SyncResult typo = push("{\"schemaVersion\":1,\"module\":\"" + code + "\",\"version\":\"1\",\"items\":[{\"key\":\"a\","
-                + "\"label\":\"A\",\"route\":\"" + prefix + "/a\",\"requiredPriviledge\":\"billing.view\"}]}");
+                + "\"label\":\"A\",\"route\":\"" + prefix + "/a\",\"requiredPriviledge\":\"platform.subscription.view\"}]}");
         assertThat(typo.outcome()).isEqualTo(ManifestOutcome.REJECTED);
         assertThat(typo.errors().get(0)).contains("requiredPriviledge");
         assertThat(registry.get(operator, code).health()).isEqualTo("DOWN");      // never delivered a valid manifest
@@ -293,7 +295,7 @@ class MenuModuleIT {
     void routeAndCodeConflictsWithOtherOwnersAreRejected() {
         activeModule();
         MenuOp platform = MenuOp.builder().op(MenuOpType.PUT_ITEM).code(uniq("plat")).label("Platform item")
-                .route(prefix + "/shared").roles(Set.of("DOCTOR")).build();
+                .route(prefix + "/shared").build();
         draftAndPublish(platform);
         // drafts can no longer create codes in a module's namespace; a row from before that rule still can exist
         jdbc.update("INSERT INTO menu_items (id, application_id, code, label) "
@@ -316,7 +318,7 @@ class MenuModuleIT {
         // a code platform items already use as their namespace
         String area = uniq("area");
         draftAndPublish(MenuOp.builder().op(MenuOpType.PUT_ITEM).code(area + ".page").label("Page")
-                .route("/" + area + "/page").roles(Set.of("DOCTOR")).build());
+                .route("/" + area + "/page").build());
         assertThatThrownBy(() -> registry.register(operator,
                 new ModuleRequest(area, "x", null, null, "c-area-" + code, null, List.of(prefix), null)))
                 .isInstanceOf(MenuConflictException.class).hasMessageContaining("already used");
@@ -337,7 +339,7 @@ class MenuModuleIT {
         long before = globalVersion();
         int rows = historyRows("ACCEPTED");
 
-        String reordered = "{\"items\":[{\"requiredPrivilege\":\"billing.view\",\"route\":\"" + prefix + "/a\",\"label\":\"A\",\"key\":\"a\"}],"
+        String reordered = "{\"items\":[{\"requiredPrivilege\":\"platform.subscription.view\",\"route\":\"" + prefix + "/a\",\"label\":\"A\",\"key\":\"a\"}],"
                 + "\"version\":\"1\",\"module\":\"" + code + "\",\"schemaVersion\":1}";
         SyncResult r = push(reordered);
 
@@ -390,7 +392,7 @@ class MenuModuleIT {
     void administratorsMayHideAndReorderModuleItemsButNotEditThem() {
         activeModule();
         push(manifest("1", item("root", null, "Root", null, "GROUP", null),
-                item("a", "root", "A", prefix + "/a", null, "billing.view")));
+                item("a", "root", "A", prefix + "/a", null, "platform.subscription.view")));
         String a = fullCode("a"), root = fullCode("root");
 
         for (MenuOp forbidden : new MenuOp[]{
@@ -398,7 +400,7 @@ class MenuModuleIT {
                 MenuOp.builder().op(MenuOpType.PATCH_ITEM).code(a).route("/x").build(),
                 MenuOp.builder().op(MenuOpType.DELETE_ITEM).code(a).build(),
                 MenuOp.builder().op(MenuOpType.MOVE_ITEM).code(a).build(),
-                MenuOp.builder().op(MenuOpType.SET_ROLES).code(a).roles(Set.of("DOCTOR")).build(),
+                MenuOp.builder().op(MenuOpType.SET_USER_ACCESS).code(a).userId(UUID.randomUUID()).effect("GRANT").build(),
                 MenuOp.builder().op(MenuOpType.PUT_ITEM).code(a).label("Replace").route("/x").build(),
                 MenuOp.builder().op(MenuOpType.PUT_ITEM).code(uniq("p")).label("Under module").route("/p").parentCode(root).build()}) {
             assertThatThrownBy(() -> drafts.append(operator, new DraftOpsRequest(null, null, List.of(forbidden))))

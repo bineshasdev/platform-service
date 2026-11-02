@@ -1,6 +1,6 @@
 package com.flowbinary.platformservice.service;
 
-import com.flowbinary.platformservice.authz.service.LegacyRoleBridge;
+import com.flowbinary.platformservice.authz.service.TenantOnboarding;
 import com.flowbinary.platformservice.config.KeycloakProperties;
 import com.flowbinary.platformservice.dto.ResolveTenantResponse;
 import com.flowbinary.platformservice.dto.TenantSignupRequest;
@@ -40,7 +40,7 @@ public class TenantService {
     private final PlatformEventPublisher       eventPublisher;
     private final Keycloak                     keycloakAdmin;
     private final KeycloakProperties           kcProps;
-    private final LegacyRoleBridge             authzBridge;
+    private final TenantOnboarding             onboarding;
 
     /**
      * Registers a new tenant (Keycloak organisation) and its first admin user.
@@ -88,7 +88,7 @@ public class TenantService {
             addMemberToOrganisation(realm, keycloakOrgId, keycloakUserId);
 
             // ── 3b. Assign tenantadmin realm role ─────────────────
-            assignRealmRole(realm, keycloakUserId, PlatformRole.TENANTADMIN);
+            assignRealmRole(realm, keycloakUserId, PrincipalType.TENANT_MEMBER);
 
             // ── 4. Persist Tenant ─────────────────────────────────
             Tenant tenant = Tenant.builder()
@@ -111,11 +111,10 @@ public class TenantService {
                     .email(request.getAdminEmail())
                     .firstName(request.getAdminFirstName())
                     .lastName(request.getAdminLastName())
-                    .role(PlatformRole.TENANTADMIN)
                     .status("ACTIVE")
                     .build();
             adminUser = tenantUserRepository.save(adminUser);
-            authzBridge.onTenantCreated(tenant, adminUser.getAuthUserId());
+            onboarding.onTenantCreated(tenant, adminUser.getAuthUserId());
 
             // ── 6. Assign free plan ───────────────────────────────
             assignFreePlan(tenant);
@@ -230,10 +229,10 @@ public class TenantService {
         }
     }
 
-    private void assignRealmRole(RealmResource realm, String userId, PlatformRole platformRole) {
-        RoleRepresentation role = realm.roles().get(platformRole.roleName()).toRepresentation();
+    private void assignRealmRole(RealmResource realm, String userId, PrincipalType principalType) {
+        RoleRepresentation role = realm.roles().get(principalType.roleName()).toRepresentation();
         realm.users().get(userId).roles().realmLevel().add(List.of(role));
-        log.debug("Assigned realm role '{}' to user {}", platformRole.roleName(), userId);
+        log.debug("Assigned realm role '{}' to user {}", principalType.roleName(), userId);
     }
 
     /** Best-effort cleanup of Keycloak resources when the DB transaction fails. */

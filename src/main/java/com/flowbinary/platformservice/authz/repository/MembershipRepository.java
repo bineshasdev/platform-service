@@ -20,5 +20,7 @@ public interface MembershipRepository extends JpaRepository<Membership, UUID> {
 
     List<Membership> findByTenantIdOrderByCreatedAtAsc(UUID tenantId);
 
+    List<Membership> findByTenantIdIsNullOrderByCreatedAtAsc();
+
     List<Membership> findByTenantIdAndStatus(UUID tenantId, MembershipStatus status);
 }

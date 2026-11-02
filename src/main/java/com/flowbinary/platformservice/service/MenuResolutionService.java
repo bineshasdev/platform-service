@@ -1,7 +1,9 @@
 package com.flowbinary.platformservice.service;
 
 import com.flowbinary.platformservice.authz.model.AuthzRole;
+import com.flowbinary.platformservice.authz.sdk.PermissionCache;
 import com.flowbinary.platformservice.authz.service.EffectivePermissionService;
+import com.flowbinary.platformservice.authz.service.Operators;
 import com.flowbinary.platformservice.authz.service.PermissionCalculator;
 import com.flowbinary.platformservice.authz.service.PermissionCalculator.RoleContribution;
 import com.flowbinary.platformservice.authz.service.PermissionCalculator.Scope;
@@ -41,6 +43,8 @@ public class MenuResolutionService {
     private final MenuUserAccessRepository      menuUserAccessRepository;
     private final EffectivePermissionService    permissions;
     private final TenantFeatures                tenantFeatures;
+    private final PermissionCache               permissionCache;
+    private final Operators                     operators;
     private final MenuCatalogueCache            catalogueCache;
     private final MenuMetrics                   metrics;
 
@@ -57,17 +61,18 @@ public class MenuResolutionService {
 
     /**
      * Privilege codes the user holds in their tenant, in the authorization model's
-     * codes. A platform superadmin holds every privilege ({@code "*"}); a user whose
+     * codes. A platform operator holds every privilege ({@code "*"}); a user whose
      * membership is missing or not active holds none.
      */
     @Transactional(readOnly = true)
     public Set<String> effectivePrivileges(TenantUser user) {
-        if (user.getRole() == PlatformRole.SUPERADMIN) return Set.of("*");
+        if (operators.is(user.getAuthUserId())) return Set.of("*");
         return memberPrivileges(user.getTenant().getId(), user.getAuthUserId()).privileges();
     }
 
+    /** Through the same short-lived cache the decision bean uses, so a menu request does not recompute roles. */
     private PermissionSet memberPrivileges(UUID tenantId, UUID userSub) {
-        return permissions.forTenant(tenantId, userSub);
+        return permissionCache.get(tenantId, userSub, () -> permissions.forTenant(tenantId, userSub));
     }
 
     // ── Menu resolution ────────────────────────────────────────────────────
@@ -105,7 +110,7 @@ public class MenuResolutionService {
     }
 
     private List<MenuEntry> resolve(MenuContext ctx, MenuCatalogue catalogue) {
-        boolean allPrivileges = ctx.user().getRole() == PlatformRole.SUPERADMIN;
+        boolean allPrivileges = operators.is(ctx.user().getAuthUserId());
         PermissionSet set = allPrivileges ? null : memberPrivileges(ctx.tenant().getId(), ctx.user().getAuthUserId());
         if (set != null && set.status() != PermissionSet.Status.ACTIVE) {
             log.debug("menu.resolve no active membership ({}): empty menu", set.status());

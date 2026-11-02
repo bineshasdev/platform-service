@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.controller;
 
+import com.flowbinary.platformservice.authz.sdk.RequiresPrivilege;
 import com.flowbinary.platformservice.dto.dataimport.ImportResult;
 import com.flowbinary.platformservice.service.dataimport.ClinicImportService;
 import com.flowbinary.platformservice.service.dataimport.DoctorClinicMappingImportService;
@@ -10,7 +11,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -30,7 +30,7 @@ import java.io.IOException;
 @RestController
 @RequestMapping("/api/v1/admin/imports")
 @RequiredArgsConstructor
-@PreAuthorize("hasAuthority('ROLE_SUPERADMIN')")
+@RequiresPrivilege("platform.tenant.manage")
 @Tag(name = "Admin — Imports", description = "Bulk import (SUPERADMIN)")
 public class AdminImportController {
 

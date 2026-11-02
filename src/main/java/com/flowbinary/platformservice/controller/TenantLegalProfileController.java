@@ -24,7 +24,7 @@ public class TenantLegalProfileController {
     private final TenantLegalProfileService legalProfileService;
 
     @PutMapping
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("@authz.hasInTenant(authentication, 'platform.settings.manage', #tenantId)")
     @Operation(summary = "Create or update the tenant's legal profile")
     LegalProfileResponse upsert(@PathVariable UUID tenantId,
                                 @Valid @RequestBody LegalProfileRequest request) {
@@ -32,7 +32,7 @@ public class TenantLegalProfileController {
     }
 
     @GetMapping
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("@authz.hasInTenant(authentication, 'platform.settings.manage', #tenantId)")
     @Operation(summary = "Fetch the tenant's legal profile")
     LegalProfileResponse get(@PathVariable UUID tenantId) {
         return legalProfileService.get(tenantId);

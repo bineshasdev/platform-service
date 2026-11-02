@@ -38,27 +38,9 @@ final class MenuTestFixtures {
         return m;
     }
 
-    static MenuItem withRole(MenuItem m, Role role) {
-        m.getRoleAccess().add(MenuRoleAccess.builder()
-                .id(new MenuRoleAccessId(m.getId(), role.getId())).menuItem(m).role(role).build());
-        return m;
-    }
-
-    static Role role(String code) {
-        Role r = Role.builder().code(code).name(code).build();
-        r.setId(UUID.randomUUID());
-        return r;
-    }
-
-    static Privilege privilege(String code) {
-        Privilege p = Privilege.builder().code(code).name(code).category("X").build();
-        p.setId(UUID.randomUUID());
-        return p;
-    }
-
-    /** An item every plan and the given role can see. */
-    static MenuItem open(String code, MenuItem parent, Role role) {
-        return withRole(withPlans(item(code, parent), TenantPlan.values()), role);
+    /** An item every plan can see and no privilege gates. */
+    static MenuItem open(String code, MenuItem parent) {
+        return withPlans(item(code, parent), TenantPlan.values());
     }
 
     static Set<UUID> ids(MenuItem... items) {

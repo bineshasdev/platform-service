@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.controller;
 
+import com.flowbinary.platformservice.authz.sdk.RequiresPrivilege;
 import com.flowbinary.platformservice.dto.module.ManifestHistoryResponse;
 import com.flowbinary.platformservice.dto.module.ModuleRequest;
 import com.flowbinary.platformservice.dto.module.ModuleResponse;
@@ -22,6 +23,7 @@ import java.util.List;
 @RequestMapping("/api/v1/admin/menu-modules")
 @RequiredArgsConstructor
 @Tag(name = "Menu modules", description = "Register, approve, suspend and refresh menu-contributing modules (operators only)")
+@RequiresPrivilege("platform.template.manage")
 public class MenuModuleController {
 
     private static final String APP = MenuResolutionService.DEFAULT_APPLICATION;

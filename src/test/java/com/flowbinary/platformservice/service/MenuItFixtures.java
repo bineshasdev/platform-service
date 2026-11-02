@@ -20,19 +20,17 @@ final class MenuItFixtures {
     }
 
     /**
-     * Two global PROVIDER_CONSOLE items the functional tests edit, hide and grant on:
-     * {@code fx_dash} (no privilege, every system role) and {@code fx_admin_users}
-     * (needs {@code user.manage}). They stand in for the retired V5 items, so the tests
+     * Two global PROVIDER_CONSOLE items the functional tests edit and hide:
+     * {@code fx_dash} (no privilege, so every active member) and {@code fx_admin_users}
+     * (needs {@code platform.member.manage}). They stand in for the retired V5 items, so the tests
      * do not depend on whatever the catalogue seed ships. Idempotent.
      */
     static void ensureItems(JdbcTemplate jdbc) {
-        jdbc.update("INSERT INTO menu_items (application_id, code, label, route, type, sort_order, depth, path, required_privilege_id) " +
-                "SELECT a.id, v.code, v.label, v.route, 'LINK', 900, 0, v.code, p.id " +
-                "FROM applications a CROSS JOIN (VALUES ('fx_dash','Fixture dashboard','/fx-dash',NULL),('fx_admin_users','Fixture users','/fx-users','user.manage')) " +
-                "AS v(code,label,route,priv) LEFT JOIN privileges p ON p.code = v.priv " +
+        jdbc.update("INSERT INTO menu_items (application_id, code, label, route, type, sort_order, depth, path, required_privilege) " +
+                "SELECT a.id, v.code, v.label, v.route, 'LINK', 900, 0, v.code, v.priv " +
+                "FROM applications a CROSS JOIN (VALUES ('fx_dash','Fixture dashboard','/fx-dash',NULL),('fx_admin_users','Fixture users','/fx-users','platform.member.manage')) " +
+                "AS v(code,label,route,priv) " +
                 "WHERE a.code = 'PROVIDER_CONSOLE' ON CONFLICT DO NOTHING");
-        jdbc.update("INSERT INTO menu_role_access (menu_item_id, role_id) SELECT m.id, r.id FROM menu_items m, roles r " +
-                "WHERE m.code IN ('fx_dash','fx_admin_users') AND r.tenant_id IS NULL ON CONFLICT DO NOTHING");
         jdbc.update("INSERT INTO menu_plan_access (menu_item_id, plan) SELECT m.id, pl.plan FROM menu_items m, " +
                 "(VALUES ('free'),('starter'),('pro'),('enterprise')) AS pl(plan) " +
                 "WHERE m.code IN ('fx_dash','fx_admin_users') ON CONFLICT DO NOTHING");
@@ -54,8 +52,9 @@ final class MenuItFixtures {
 
     Person person(String platformRole, UUID tenantId, String orgId) {
         UUID auth = UUID.randomUUID(), uid = UUID.randomUUID();
-        jdbc.update("INSERT INTO users (id, tenant_id, auth_user_id, role, email, username) VALUES (?,?,?,?,?,?)",
-                uid, tenantId, auth, platformRole, auth + "@t.test", "u" + uid.toString().substring(0, 8));
+        jdbc.update("INSERT INTO users (id, tenant_id, auth_user_id, email, username) VALUES (?,?,?,?,?)",
+                uid, tenantId, auth, auth + "@t.test", "u" + uid.toString().substring(0, 8));
+        AuthzTestSupport.addMember(jdbc, tenantId, auth, platformRole);
         return new Person(auth, uid, orgId, tenantId);
     }
 

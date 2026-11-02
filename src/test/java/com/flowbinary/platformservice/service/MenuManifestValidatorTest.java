@@ -4,7 +4,7 @@ import com.flowbinary.platformservice.dto.module.MenuManifest;
 import com.flowbinary.platformservice.dto.module.MenuManifest.Item;
 import com.flowbinary.platformservice.model.MenuModule;
 import com.flowbinary.platformservice.model.MenuPlacement;
-import com.flowbinary.platformservice.model.Privilege;
+import com.flowbinary.platformservice.authz.model.AuthzPrivilege;
 import com.flowbinary.platformservice.service.MenuManifestValidator.Refs;
 import com.flowbinary.platformservice.service.MenuManifestValidator.Result;
 import org.junit.jupiter.api.Test;
@@ -16,33 +16,37 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MenuManifestValidatorTest {
 
     private final MenuModule module = MenuModule.builder().code("billing")
-            .allowedRoutePrefixes(List.of("/billing")).privilegeModuleCode("M10").build();
+            .allowedRoutePrefixes(List.of("/billing")).privilegeModuleCode("billing").build();
 
-    /** Privileges: invoice.view (M10, ours), dashboard.view (shared), lab.order (M07, someone else's). */
-    private final Map<String, Privilege> privileges = new HashMap<>();
+    /** Privileges: billing.invoice.view (the module's own service), platform.dashboard.view (shared), lab.order.create (another service's). */
+    private final Map<String, AuthzPrivilege> privileges = new HashMap<>();
     private final Map<String, String> routeOwners = new HashMap<>();
     private final Map<String, String> codeOwners = new HashMap<>();
     private final Set<String> features = new HashSet<>(Set.of("billing"));
 
     private final Refs refs = new Refs() {
-        public Optional<Privilege> privilege(String c) { return Optional.ofNullable(privileges.get(c)); }
+        public Optional<AuthzPrivilege> privilege(String c) { return Optional.ofNullable(privileges.get(c)); }
         public boolean featureExists(String c) { return features.contains(c); }
         public Optional<String> routeOwner(String r) { return Optional.ofNullable(routeOwners.get(r)); }
         public Optional<String> codeOwner(String c) { return Optional.ofNullable(codeOwners.get(c)); }
     };
 
     MenuManifestValidatorTest() {
-        privileges.put("invoice.view", priv("invoice.view", "M10"));
-        privileges.put("dashboard.view", priv("dashboard.view", null));
-        privileges.put("lab.order", priv("lab.order", "M07"));
+        privileges.put("billing.invoice.view", priv("billing.invoice.view"));
+        privileges.put("platform.dashboard.view", priv("platform.dashboard.view"));
+        privileges.put("lab.order.create", priv("lab.order.create"));
     }
 
-    private static Privilege priv(String code, String module) {
-        return Privilege.builder().code(code).name(code).category("X").moduleCode(module).build();
+    private static AuthzPrivilege priv(String code) {
+        AuthzPrivilege p = new AuthzPrivilege();
+        p.setCode(code);
+        p.setOwnerService(code.substring(0, code.indexOf('.')));
+        p.setName(code);
+        return p;
     }
 
     private static Item link(String key, String parent, String route) {
-        return new Item(key, parent, key, null, null, route, null, null, null, null, null, null, null, "invoice.view", null, null);
+        return new Item(key, parent, key, null, null, route, null, null, null, null, null, null, null, "billing.invoice.view", null, null);
     }
 
     private static Item group(String key, String parent) {
@@ -63,7 +67,7 @@ class MenuManifestValidatorTest {
     void placementAndTenantTypesDefaultAndAreChecked() {
         Item plain = link("a", null, "/billing/a");
         Item placed = new Item("b", null, "B", null, null, "/billing/b", null, null, null, "SETTINGS",
-                List.of("STORE", "LAB"), null, null, "invoice.view", null, null);
+                List.of("STORE", "LAB"), null, null, "billing.invoice.view", null, null);
         Result ok = check(plain, placed);
         assertThat(ok.errors()).isEmpty();
         assertThat(ok.items().get(0).placement()).isEqualTo(MenuPlacement.LEFT);
@@ -72,9 +76,9 @@ class MenuManifestValidatorTest {
         assertThat(ok.items().get(1).tenantTypes()).containsExactly("LAB", "STORE");
 
         rejects(check(new Item("c", null, "C", null, null, "/billing/c", null, null, null, "SIDEBAR",
-                null, null, null, "invoice.view", null, null)), "placement");
+                null, null, null, "billing.invoice.view", null, null)), "placement");
         rejects(check(new Item("c", null, "C", null, null, "/billing/c", null, null, null, null,
-                List.of("HOSPITAL"), null, null, "invoice.view", null, null)), "tenantTypes");
+                List.of("HOSPITAL"), null, null, "billing.invoice.view", null, null)), "tenantTypes");
     }
 
     @Test
@@ -82,14 +86,14 @@ class MenuManifestValidatorTest {
         Result r = check(group("root", null), link("invoices", "root", "/billing/invoices?x=1"));
         assertThat(r.errors()).isEmpty();
         assertThat(r.items()).extracting("code").containsExactly("billing.root", "billing.invoices");
-        assertThat(r.items().get(1).privilege().getCode()).isEqualTo("invoice.view");
+        assertThat(r.items().get(1).privilege().getCode()).isEqualTo("billing.invoice.view");
     }
 
     @Test
     void acceptsSharedPlatformPrivilegesButNotAnotherModulesPrivileges() {
-        Item shared = new Item("a", null, "A", null, null, "/billing/a", null, null, null, null, null, null, null, "dashboard.view", null, null);
+        Item shared = new Item("a", null, "A", null, null, "/billing/a", null, null, null, null, null, null, null, "platform.dashboard.view", null, null);
         assertThat(check(shared).ok()).isTrue();
-        Item foreign = new Item("a", null, "A", null, null, "/billing/a", null, null, null, null, null, null, null, "lab.order", null, null);
+        Item foreign = new Item("a", null, "A", null, null, "/billing/a", null, null, null, null, null, null, null, "lab.order.create", null, null);
         rejects(check(foreign), "belongs to another module");
         Item missing = new Item("a", null, "A", null, null, "/billing/a", null, null, null, null, null, null, null, "nope.nope", null, null);
         rejects(check(missing), "does not exist");
@@ -127,7 +131,7 @@ class MenuManifestValidatorTest {
 
     @Test
     void externalLinksAreNotAllowed() {
-        Item ext = new Item("a", null, "A", null, null, "https://evil.example", "EXTERNAL", null, null, null, null, null, null, "invoice.view", null, null);
+        Item ext = new Item("a", null, "A", null, null, "https://evil.example", "EXTERNAL", null, null, null, null, null, null, "billing.invoice.view", null, null);
         rejects(check(ext), "EXTERNAL is not allowed");
     }
 
@@ -174,13 +178,13 @@ class MenuManifestValidatorTest {
 
     @Test
     void featuresIconsAndTranslationsAreChecked() {
-        Item badFeature = new Item("a", null, "A", null, null, "/billing/a", null, null, null, null, null, null, null, "invoice.view", "ghost", null);
+        Item badFeature = new Item("a", null, "A", null, null, "/billing/a", null, null, null, null, null, null, null, "billing.invoice.view", "ghost", null);
         rejects(check(badFeature), "requiredFeature");
-        Item okFeature = new Item("a", null, "A", null, null, "/billing/a", null, null, null, null, null, null, null, "invoice.view", "billing", null);
+        Item okFeature = new Item("a", null, "A", null, null, "/billing/a", null, null, null, null, null, null, null, "billing.invoice.view", "billing", null);
         assertThat(check(okFeature).ok()).isTrue();
-        Item badIcon = new Item("a", null, "A", null, "<img>", "/billing/a", null, null, null, null, null, null, null, "invoice.view", null, null);
+        Item badIcon = new Item("a", null, "A", null, "<img>", "/billing/a", null, null, null, null, null, null, null, "billing.invoice.view", null, null);
         rejects(check(badIcon), "icon");
-        Item badLocale = new Item("a", null, "A", null, null, "/billing/a", null, null, null, null, null, null, null, "invoice.view", null, Map.of("EN_us!", "x"));
+        Item badLocale = new Item("a", null, "A", null, null, "/billing/a", null, null, null, null, null, null, null, "billing.invoice.view", null, Map.of("EN_us!", "x"));
         rejects(check(badLocale), "bad locale");
     }
 

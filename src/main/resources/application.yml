@@ -102,6 +102,8 @@ spring:
       resourceserver:
         jwt:
           issuer-uri: ${JWT_ISSUER_URI:http://localhost:9080/realms/master}
+          # Reject tokens issued for another audience, e.g. JWT_AUDIENCES=cliniqai-api. Empty = not checked (local development only).
+          audiences: ${JWT_AUDIENCES:}
 
 # ── Keycloak Admin ────────────────────────────────────────────────
 keycloak:
@@ -220,6 +222,7 @@ app:
       - platform-ui 
       - cliniqai-ui       # Next.js front-end (client credentials)
       - api-gateway        # Internal API gateway
+      - notification-service  # Asks for users' permission sets (authz SDK)
       - admin-cli          # Keycloak admin CLI (dev/testing)
       - internal-client     # Placeholder for other internal services
   storage:

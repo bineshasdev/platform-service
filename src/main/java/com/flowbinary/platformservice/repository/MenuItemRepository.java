@@ -27,7 +27,6 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, UUID> {
      */
     @Query("""
             SELECT m FROM MenuItem m
-            LEFT JOIN FETCH m.requiredPrivilege
             WHERE m.application.code = :applicationCode
               AND (m.tenant IS NULL OR m.tenant.id = :tenantId)
               AND m.isActive = true
@@ -50,7 +49,6 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, UUID> {
      */
     @Query("""
             SELECT m FROM MenuItem m
-            LEFT JOIN FETCH m.requiredPrivilege
             WHERE m.application.id = :applicationId
               AND (m.tenant IS NULL OR m.tenant.id = :tenantId)
             ORDER BY m.depth ASC, m.sortOrder ASC
@@ -61,7 +59,6 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, UUID> {
     /** Global scope: only the platform's own items. */
     @Query("""
             SELECT m FROM MenuItem m
-            LEFT JOIN FETCH m.requiredPrivilege
             WHERE m.application.id = :applicationId AND m.tenant IS NULL
             ORDER BY m.depth ASC, m.sortOrder ASC
             """)

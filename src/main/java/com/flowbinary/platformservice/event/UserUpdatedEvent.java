@@ -1,6 +1,5 @@
 package com.flowbinary.platformservice.event;
 
-import com.flowbinary.platformservice.model.PlatformRole;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -28,7 +27,8 @@ public class UserUpdatedEvent extends PlatformEvent {
     private String email;
     private String firstName;
     private String lastName;
-    private PlatformRole role;
+    /** Code of the member's primary role in the authorization model. */
+    private String role;
     private String status;
 
     /** Names of fields that changed in this update (e.g. ["role", "status"]). */

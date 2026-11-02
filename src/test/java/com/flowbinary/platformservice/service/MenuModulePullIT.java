@@ -1,5 +1,9 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.sdk.PermissionCache;
+import com.flowbinary.platformservice.authz.service.EffectivePermissionService;
+import com.flowbinary.platformservice.authz.service.Operators;
+import com.flowbinary.platformservice.authz.service.TenantFeatures;
 import com.flowbinary.platformservice.config.AppProperties;
 import com.flowbinary.platformservice.config.JpaConfig;
 import com.flowbinary.platformservice.dto.module.ModuleRequest;
@@ -50,7 +54,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         MenuHierarchyValidator.class, MenuReferenceLookup.class, MenuDraftService.class, MenuPublishService.class,
         MenuPreviewService.class, MenuCatalogueService.class, AuditService.class, MenuAdminAccess.class,
         MenuResolutionService.class, MenuQueryService.class, SettingsResolver.class, TenantContextResolver.class,
-        UserGroupService.class, TemporaryMenuService.class, TemporaryMenuLifecycleService.class,
+        EffectivePermissionService.class, TenantFeatures.class, PermissionCache.class, Operators.class, TemporaryMenuService.class, TemporaryMenuLifecycleService.class,
         MenuCatalogueCache.class, MenuCatalogueCompiler.class, MenuMetrics.class, MenuCatalogEvents.class,
         MenuModuleSyncService.class, MenuModuleRegistryService.class, MenuModulePuller.class,
         MenuModulePullScheduler.class, ModuleIdentity.class})
@@ -114,7 +118,7 @@ class MenuModulePullIT {
         server.start();
         body.set(good("1", "A"));
         registry.register(operator, new ModuleRequest(code, "n", null, null, client,
-                "http://127.0.0.1:" + server.getAddress().getPort() + "/menu", List.of(prefix), "M10"));
+                "http://127.0.0.1:" + server.getAddress().getPort() + "/menu", List.of(prefix), "billing"));
         registry.approve(operator, code);
     }
 
@@ -125,7 +129,7 @@ class MenuModulePullIT {
 
     private String good(String version, String label) {
         return "{\"schemaVersion\":1,\"module\":\"" + code + "\",\"version\":\"" + version + "\",\"items\":["
-                + "{\"key\":\"a\",\"label\":\"" + label + "\",\"route\":\"" + prefix + "/a\",\"requiredPrivilege\":\"billing.view\"}]}";
+                + "{\"key\":\"a\",\"label\":\"" + label + "\",\"route\":\"" + prefix + "/a\",\"requiredPrivilege\":\"platform.subscription.view\"}]}";
     }
 
     private String label() {

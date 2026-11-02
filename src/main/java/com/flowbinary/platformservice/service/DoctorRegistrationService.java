@@ -5,7 +5,7 @@ import com.flowbinary.platformservice.dto.registration.DoctorRegistrationRequest
 import com.flowbinary.platformservice.dto.registration.DoctorRegistrationResponse;
 import com.flowbinary.platformservice.event.DoctorRegisteredEvent;
 import com.flowbinary.platformservice.messaging.PlatformEventPublisher;
-import com.flowbinary.platformservice.model.PlatformRole;
+import com.flowbinary.platformservice.model.PrincipalType;
 import com.flowbinary.platformservice.model.VerificationStatus;
 import com.flowbinary.platformservice.repository.DoctorRepository;
 import lombok.RequiredArgsConstructor;
@@ -87,7 +87,7 @@ public class DoctorRegistrationService {
             keycloakUserId = keycloak.createUser(email, email,
                     request.getFirstName(), request.getLastName(),
                     request.getPassword(), false);
-            keycloak.assignRealmRole(keycloakUserId, PlatformRole.DOCTOR);
+            keycloak.assignRealmRole(keycloakUserId, PrincipalType.TENANT_MEMBER);
 
             String authUserId = keycloakUserId;
             DoctorRegistrationResponse response = new TransactionTemplate(transactionManager).execute(

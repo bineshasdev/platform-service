@@ -40,7 +40,7 @@ public class Authz {
     private final PermissionCache cache;
     private final AuditService audit;
     private final Cache<String, Map<String, AuthzPrivilege>> catalogue = Caffeine.newBuilder()
-            .expireAfterWrite(Duration.ofMinutes(5)).maximumSize(1).build();
+            .expireAfterWrite(Duration.ofSeconds(60)).maximumSize(1).build();
 
     public Authz(TenantContextResolver tenantContext, EffectivePermissionService permissions,
                  PermissionCache cache, AuditService audit) {
@@ -48,6 +48,11 @@ public class Authz {
         this.permissions = permissions;
         this.cache = cache;
         this.audit = audit;
+    }
+
+    /** Forget the privilege catalogue so a privilege a service has just declared is known at once. */
+    public void refreshCatalogue() {
+        catalogue.invalidateAll();
     }
 
     /** For {@code @PreAuthorize}: true when every implemented layer allows. */
@@ -59,6 +64,37 @@ public class Authz {
     public void require(Authentication authentication, String privilege) {
         Decision d = decide(authentication, privilege);
         if (!d.allowed()) throw new AccessDeniedException("Denied at " + d.layer() + ": " + d.reason());
+    }
+
+    /**
+     * True for an active member of the tenant pinned in the token. The check for endpoints every
+     * member may use (their own profile, notifications, the menu, files).
+     */
+    public boolean member(Authentication authentication) {
+        Optional<Jwt> jwt = jwt(authentication);
+        if (jwt.isEmpty()) return false;
+        Optional<UUID> sub = subject(jwt.get());
+        Optional<Tenant> tenant = tenantContext.resolveFromJwt(jwt.get());
+        if (sub.isEmpty() || tenant.isEmpty()) return false;
+        UUID tenantId = tenant.get().getId();
+        PermissionSet set = cache.get(tenantId, sub.get(), () -> permissions.forTenant(tenantId, sub.get()));
+        boolean active = set.status() == PermissionSet.Status.ACTIVE;
+        if (!active) log.info("Authz denied: member check, status={}", set.status());
+        return active;
+    }
+
+    /**
+     * Holds {@code privilege} in the caller's own tenant, and {@code tenantId} (from a request path) is
+     * that tenant. A path naming another tenant is refused whatever the caller holds.
+     */
+    public boolean hasInTenant(Authentication authentication, String privilege, UUID tenantId) {
+        Optional<Jwt> jwt = jwt(authentication);
+        Optional<UUID> own = jwt.flatMap(tenantContext::resolveFromJwt).map(Tenant::getId);
+        if (own.isEmpty() || !own.get().equals(tenantId)) {
+            log.info("Authz denied: path tenant {} is not the caller's tenant", tenantId);
+            return false;
+        }
+        return has(authentication, privilege);
     }
 
     public Decision decide(Authentication authentication, String privilege) {

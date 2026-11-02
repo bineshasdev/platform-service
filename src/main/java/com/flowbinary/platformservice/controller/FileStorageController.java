@@ -1,5 +1,7 @@
 package com.flowbinary.platformservice.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.flowbinary.platformservice.authz.sdk.RequiresPrivilege;
 import com.flowbinary.platformservice.dto.storage.FileMetadataResponse;
 import com.flowbinary.platformservice.dto.storage.FileUploadResponse;
 import com.flowbinary.platformservice.model.FileType;
@@ -28,6 +30,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/files")
+@PreAuthorize("@authz.member(authentication)")
 @RequiredArgsConstructor
 @Tag(name = "File Storage", description = "Upload, download, and manage tenant files")
 public class FileStorageController {
@@ -124,6 +127,7 @@ public class FileStorageController {
     // ── Delete ────────────────────────────────────────────────────────────────
 
     @DeleteMapping("/{id}")
+    @RequiresPrivilege("platform.document.delete")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "Soft-delete a file (marks status=DELETED, frees quota)")
     void delete(

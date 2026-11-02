@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.authz.service;
 
+import com.flowbinary.platformservice.authz.sdk.Authz;
 import com.flowbinary.platformservice.authz.sdk.PermissionCache;
 import com.flowbinary.platformservice.config.AppProperties;
 import com.flowbinary.platformservice.event.AuthzChangedEvent;
@@ -26,13 +27,27 @@ public class AuthzEvents {
     private final PermissionCache cache;
     private final ObjectProvider<KafkaTemplate<String, Object>> kafka;
     private final AppProperties properties;
+    private final ObjectProvider<Authz> authz;
+
+    public static final String CATALOGUE_CHANGED = "CATALOGUE_CHANGED";
 
     public AuthzEvents(PermissionCache cache,
                        @Qualifier("kafkaTemplate") ObjectProvider<KafkaTemplate<String, Object>> kafka,
-                       AppProperties properties) {
+                       AppProperties properties,
+                       ObjectProvider<Authz> authz) {
         this.cache = cache;
         this.kafka = kafka;
         this.properties = properties;
+        this.authz = authz;
+    }
+
+    /** The privilege catalogue or a template changed: everything cached about who may do what is stale. */
+    public void catalogueChanged(String reason) {
+        afterCommit(() -> {
+            authz.ifAvailable(Authz::refreshCatalogue);
+            cache.invalidateAll();
+            send(AuthzChangedEvent.builder().reason(reason).build());
+        });
     }
 
     /** One user's access in one tenant changed. */
@@ -54,6 +69,7 @@ public class AuthzEvents {
 
     /** Applies an event heard from any instance, this one included. */
     public void apply(AuthzChangedEvent event) {
+        authz.ifAvailable(Authz::refreshCatalogue);
         if (event.getUserSub() != null) {
             cache.invalidate(event.getTenantId(), event.getUserSub());
         } else if (event.getTenantId() != null || event.isPlatform()) {

@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.controller;
 
+import com.flowbinary.platformservice.authz.sdk.RequiresPrivilege;
 import com.flowbinary.platformservice.dto.registration.RegistrationStatusResponse;
 import com.flowbinary.platformservice.dto.registration.VerificationDecisionRequest;
 import com.flowbinary.platformservice.service.TenantVerificationService;
@@ -25,21 +26,21 @@ public class TenantVerificationController {
     private final TenantVerificationService verificationService;
 
     @GetMapping("/status")
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("@authz.hasInTenant(authentication, 'platform.settings.manage', #tenantId)")
     @Operation(summary = "Verification / onboarding progress for a tenant")
     RegistrationStatusResponse status(@PathVariable UUID tenantId) {
         return verificationService.getStatus(tenantId);
     }
 
     @PostMapping("/submit")
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("@authz.hasInTenant(authentication, 'platform.settings.manage', #tenantId)")
     @Operation(summary = "Submit the tenant's legal profile + credentials for platform review")
     RegistrationStatusResponse submitForReview(@PathVariable UUID tenantId) {
         return verificationService.submitForReview(tenantId);
     }
 
     @PostMapping("/decision")
-    @PreAuthorize("hasAuthority('ROLE_SUPERADMIN')")
+    @RequiresPrivilege("platform.tenant.verify")
     @Operation(summary = "Final verification decision — APPROVE lists the tenant in public search")
     RegistrationStatusResponse decide(@PathVariable UUID tenantId,
                                       @Valid @RequestBody VerificationDecisionRequest request) {

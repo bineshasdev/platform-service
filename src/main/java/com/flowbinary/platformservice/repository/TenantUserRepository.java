@@ -1,6 +1,5 @@
 package com.flowbinary.platformservice.repository;
 
-import com.flowbinary.platformservice.model.PlatformRole;
 import com.flowbinary.platformservice.model.TenantUser;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -17,9 +16,10 @@ import java.util.UUID;
 @Repository
 public interface TenantUserRepository extends JpaRepository<TenantUser, UUID> {
     Optional<TenantUser> findByTenantIdAndAuthUserId(UUID tenantId, UUID authUserId);
+
+    List<TenantUser> findByTenantIdAndAuthUserIdIn(UUID tenantId, java.util.Collection<UUID> authUserIds);
     Optional<TenantUser> findByTenantIdAndEmail(UUID tenantId, String email);
     List<TenantUser> findByTenantId(UUID tenantId);
-    List<TenantUser> findByTenantIdAndRole(UUID tenantId, PlatformRole role);
     List<TenantUser> findByTenantIdAndStatus(UUID tenantId, String status);
     boolean existsByTenantIdAndAuthUserId(UUID tenantId, UUID authUserId);
     @Query("SELECT LOWER(u.username) FROM TenantUser u WHERE u.tenant.id = :tenantId AND LOWER(u.username) LIKE LOWER(:prefix) || '%'")

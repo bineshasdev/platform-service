@@ -1,6 +1,6 @@
 package com.flowbinary.platformservice.service;
 
-import com.flowbinary.platformservice.authz.service.LegacyRoleBridge;
+import com.flowbinary.platformservice.authz.service.TenantOnboarding;
 import com.flowbinary.platformservice.domain.Clinic;
 import com.flowbinary.platformservice.domain.ClinicCategory;
 import com.flowbinary.platformservice.dto.registration.ClinicRegistrationRequest;
@@ -49,7 +49,7 @@ public class ClinicRegistrationService {
     private final PlatformEventPublisher       eventPublisher;
     private final KeycloakUserService          keycloak;
     private final ApplicationEventPublisher    applicationEvents;
-    private final LegacyRoleBridge             authzBridge;
+    private final TenantOnboarding             onboarding;
 
     private static final String DEFAULT_COUNTRY  = "IN";
     private static final String DEFAULT_LOCALE    = "en-IN";
@@ -94,7 +94,7 @@ public class ClinicRegistrationService {
                     request.getAdminPassword(), false);
 
             keycloak.addOrganisationMember(keycloakOrgId, keycloakUserId);
-            keycloak.assignRealmRole(keycloakUserId, PlatformRole.TENANTADMIN);
+            keycloak.assignRealmRole(keycloakUserId, PrincipalType.TENANT_MEMBER);
 
             Tenant tenant = Tenant.builder()
                     .tenantId(keycloakOrgId)
@@ -124,11 +124,10 @@ public class ClinicRegistrationService {
                     .firstName(request.getAdminFirstName())
                     .lastName(request.getAdminLastName())
                     .mobile(request.getMobile())
-                    .role(PlatformRole.TENANTADMIN)
                     .status("ACTIVE")
                     .build();
             adminUser = tenantUserRepository.save(adminUser);
-            authzBridge.onTenantCreated(tenant, adminUser.getAuthUserId());
+            onboarding.onTenantCreated(tenant, adminUser.getAuthUserId());
 
             Clinic clinic = new Clinic();
             clinic.setTenant(tenant);

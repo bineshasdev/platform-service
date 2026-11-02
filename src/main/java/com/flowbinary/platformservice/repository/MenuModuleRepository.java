@@ -24,6 +24,10 @@ public interface MenuModuleRepository extends JpaRepository<MenuModule, UUID> {
 
     boolean existsByCode(String code);
 
+    /** The live module that owns a service's privilege namespace. */
+    @Query("SELECT m FROM MenuModule m WHERE m.privilegeModuleCode = :service AND m.status <> com.flowbinary.platformservice.model.ModuleStatus.DEREGISTERED")
+    List<MenuModule> findLiveByPrivilegeModuleCode(@Param("service") String service);
+
     @Query("SELECT COUNT(m) > 0 FROM MenuModule m WHERE m.ownerClientId = :clientId AND m.status <> com.flowbinary.platformservice.model.ModuleStatus.DEREGISTERED")
     boolean existsLiveClient(@Param("clientId") String clientId);
 

@@ -1,5 +1,9 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.sdk.PermissionCache;
+import com.flowbinary.platformservice.authz.service.EffectivePermissionService;
+import com.flowbinary.platformservice.authz.service.Operators;
+import com.flowbinary.platformservice.authz.service.TenantFeatures;
 import com.flowbinary.platformservice.config.AppProperties;
 import com.flowbinary.platformservice.config.JpaConfig;
 import com.flowbinary.platformservice.dto.bootstrap.MenuEntry;
@@ -50,7 +54,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         MenuHierarchyValidator.class, MenuReferenceLookup.class, MenuDraftService.class, MenuPublishService.class,
         MenuPreviewService.class, MenuCatalogueService.class, AuditService.class, MenuAdminAccess.class,
         MenuResolutionService.class, MenuQueryService.class, SettingsResolver.class, TenantContextResolver.class,
-        UserGroupService.class, TemporaryMenuService.class, TemporaryMenuLifecycleService.class,
+        EffectivePermissionService.class, TenantFeatures.class, PermissionCache.class, Operators.class, TemporaryMenuService.class, TemporaryMenuLifecycleService.class,
         MenuCatalogueCache.class, MenuCatalogueCompiler.class, MenuMetrics.class, MenuCatalogEvents.class})
 class MenuCacheIT {
 
@@ -73,7 +77,6 @@ class MenuCacheIT {
     @Autowired MenuPreviewService preview;
     @Autowired MenuQueryService menuQuery;
     @Autowired TemporaryMenuService temps;
-    @Autowired UserGroupService groups;
     @Autowired MenuCatalogueCache cache;
     @Autowired MenuCatalogueCompiler compiler;
     @Autowired MenuMetrics metrics;
@@ -105,8 +108,9 @@ class MenuCacheIT {
 
     private Person person(String role, String orgId, UUID tenantId) {
         UUID auth = UUID.randomUUID(), uid = UUID.randomUUID();
-        jdbc.update("INSERT INTO users (id, tenant_id, auth_user_id, role, email, username) VALUES (?,?,?,?,?,?)",
-                uid, tenantId, auth, role, auth + "@t.test", "u" + uid.toString().substring(0, 8));
+        jdbc.update("INSERT INTO users (id, tenant_id, auth_user_id, email, username) VALUES (?,?,?,?,?)",
+                uid, tenantId, auth, auth + "@t.test", "u" + uid.toString().substring(0, 8));
+        AuthzTestSupport.addMember(jdbc, tenantId, auth, role);
         return new Person(auth, uid, orgId, tenantId);
     }
 
@@ -124,8 +128,8 @@ class MenuCacheIT {
         return p + UUID.randomUUID().toString().substring(0, 6);
     }
 
-    private static MenuOp put(String code, String label, Set<String> roles) {
-        return MenuOp.builder().op(MenuOpType.PUT_ITEM).code(code).label(label).route("/" + code).roles(roles).build();
+    private static MenuOp put(String code, String label) {
+        return MenuOp.builder().op(MenuOpType.PUT_ITEM).code(code).label(label).route("/" + code).build();
     }
 
     private void publishItem(AdminContext c, MenuOp op) {
@@ -205,7 +209,7 @@ class MenuCacheIT {
         Person doc = person("doctor", org, t);
         String code = uniq("pub");
 
-        publishItem(c, put(code, "One", Set.of("DOCTOR")));
+        publishItem(c, put(code, "One"));
         assertThat(find(menu(doc), code)).map(MenuEntry::getLabel).contains("One");
 
         publishItem(c, MenuOp.builder().op(MenuOpType.PATCH_ITEM).code(code).label("Two").build());
@@ -220,7 +224,7 @@ class MenuCacheIT {
         AdminContext c = ctx(person("clinic_admin", org, t), ScopeKind.TENANT);
         Person doc = person("doctor", org, t);
         String code = uniq("remote");
-        publishItem(c, put(code, "Before", Set.of("DOCTOR")));
+        publishItem(c, put(code, "Before"));
         assertThat(find(menu(doc), code)).map(MenuEntry::getLabel).contains("Before");
 
         // another instance writes (here: raw SQL); this instance has not been told
@@ -243,7 +247,7 @@ class MenuCacheIT {
         UUID other = tenant(UUID.randomUUID().toString());
         AdminContext c = ctx(person("clinic_admin", org, t), ScopeKind.TENANT);
         String own = uniq("own");
-        publishItem(c, put(own, "Own", Set.of("DOCTOR")));
+        publishItem(c, put(own, "Own"));
 
         long g0 = version(null), t0 = version(t), o0 = version(other);
 
@@ -264,27 +268,11 @@ class MenuCacheIT {
         assertThat(version(null)).isGreaterThan(g1);
         assertThat(version(other)).isEqualTo(o0);
 
-        // a tenant's override and group grant -> that tenant
+        // a tenant's override -> that tenant
         long t3 = version(t);
         jdbc.update("INSERT INTO menu_tenant_overrides (tenant_id, menu_item_id, label) SELECT ?, id, 'Home' FROM menu_items WHERE code='fx_dash'", t);
         assertThat(version(t)).isGreaterThan(t3);
-        long t4 = version(t);
-        groups.create(c, new com.flowbinary.platformservice.dto.menu.GroupRequest("g" + uniq(""), "G", null, null));
-        assertThat(version(t)).isEqualTo(t4);                                    // a group alone is not catalogue data
-        String grp = jdbc.queryForObject("SELECT code FROM user_groups WHERE tenant_id=? LIMIT 1", String.class, t);
-        drafts.append(c, new DraftOpsRequest(null, null, List.of(
-                MenuOp.builder().op(MenuOpType.SET_GROUP_ACCESS).code("fx_dash").group(grp).effect("GRANT").build())));
-        publish.publish(c, null);
-        assertThat(version(t)).isGreaterThan(t4);
         assertThat(version(other)).isEqualTo(o0);
-
-        // a role of this tenant granted on a PLATFORM item moves this tenant only, not the global counter
-        UUID roleId = UUID.randomUUID();
-        jdbc.update("INSERT INTO roles (id, tenant_id, code, name) VALUES (?,?,?,?)", roleId, t, uniq("R"), "R");
-        long g2 = version(null), t5 = version(t);
-        jdbc.update("INSERT INTO menu_role_access (menu_item_id, role_id) SELECT id, ? FROM menu_items WHERE code='fx_dash'", roleId);
-        assertThat(version(t)).isGreaterThan(t5);
-        assertThat(version(null)).isEqualTo(g2);
     }
 
     @Test
@@ -306,7 +294,7 @@ class MenuCacheIT {
         Person u1 = person("doctor", org1, t1), u2 = person("doctor", org2, t2);
         String mine = uniq("mine");
 
-        publishItem(c1, put(mine, "Mine", Set.of("DOCTOR")));
+        publishItem(c1, put(mine, "Mine"));
         assertThat(find(menu(u1), mine)).isPresent();
         assertThat(find(menu(u2), mine)).isEmpty();                 // t2's cached catalogue never held it
 
@@ -314,7 +302,7 @@ class MenuCacheIT {
         AdminContext g = ctx(operator, ScopeKind.GLOBAL);
         String glob = uniq("glob");
         menu(u2);                                                   // prime t2
-        publishItem(g, put(glob, "Platform", Set.of("DOCTOR")));
+        publishItem(g, put(glob, "Platform"));
         assertThat(find(menu(u2), glob)).isPresent();               // a global publish invalidated t2's entry too
         assertThat(find(menu(u1), glob)).isPresent();
     }
@@ -329,7 +317,7 @@ class MenuCacheIT {
 
         menu(doc);                                                  // prime the cache
         long before = version(t);
-        drafts.append(c, new DraftOpsRequest(null, null, List.of(put(code, "Draft", Set.of("DOCTOR")))));
+        drafts.append(c, new DraftOpsRequest(null, null, List.of(put(code, "Draft"))));
 
         var shown = preview.preview(c, new PreviewRequest(doc.userId(), null, true, null));
         assertThat(find(shown.menu(), code)).isPresent();           // the preview sees the draft
@@ -348,7 +336,7 @@ class MenuCacheIT {
 
         temps.create(c, new TemporaryMenuRequest(code, code, null, null, "/" + code, null, null, null, null, null, null,
                 now.plusMillis(1500), now.plusMillis(3500), null, null, null,
-                new Audience("ALL_ELIGIBLE", null, null, null)));
+                new Audience("ALL_ELIGIBLE", null)));
 
         assertThat(find(menu(doc), code)).isEmpty();                // scheduled: in the cached catalogue but not yet live
         double misses = gets("miss");
@@ -383,9 +371,9 @@ class MenuCacheIT {
         System.out.println("MENU-STATEMENTS cold=" + cold + " warm=" + warm);
 
         assertThat(warm).isLessThan(cold);
-        // The warm path skips the catalogue load (items, role/plan access, translations, overrides,
-        // group grants). The remainder is per-request tenant/user/plan/settings/role/group data, which
-        // is deliberately not cached (only the shared catalogue is).
-        assertThat(warm).isLessThanOrEqualTo(cold - 5);
+        // The warm path skips the catalogue load (items, plan access, translations, overrides, version
+        // counters). The remainder is per-request tenant/user/plan/settings data. Permission sets are
+        // cached separately (PermissionCache), so roles and privileges cost nothing here once warm.
+        assertThat(warm).isLessThanOrEqualTo(cold - 4);
     }
 }

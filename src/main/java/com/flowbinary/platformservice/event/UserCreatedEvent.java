@@ -1,6 +1,5 @@
 package com.flowbinary.platformservice.event;
 
-import com.flowbinary.platformservice.model.PlatformRole;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -30,7 +29,8 @@ public class UserCreatedEvent extends PlatformEvent {
     private String email;
     private String firstName;
     private String lastName;
-    private PlatformRole role;
+    /** Code of the member's primary role in the authorization model. */
+    private String role;
 
     /** The actor (admin/superadmin) who triggered the creation. */
     private UUID actorId;

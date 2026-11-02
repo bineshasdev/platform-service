@@ -61,10 +61,6 @@ public class AuthzPrivilege {
     @Column(name = "status", nullable = false)
     private String status;
 
-    /** The old {@code privileges.code} this replaces; used while both models run. */
-    @Column(name = "legacy_code")
-    private String legacyCode;
-
     public boolean isActive() {
         return !"DEPRECATED".equals(status);
     }

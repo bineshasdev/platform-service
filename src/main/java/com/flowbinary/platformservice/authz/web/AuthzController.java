@@ -4,6 +4,9 @@ import com.flowbinary.platformservice.authz.sdk.Authz;
 import com.flowbinary.platformservice.authz.sdk.RequiresPrivilege;
 import com.flowbinary.platformservice.authz.service.EffectivePermissionService;
 import com.flowbinary.platformservice.authz.service.MembershipService;
+import com.flowbinary.platformservice.authz.service.PlatformMembershipService;
+import com.flowbinary.platformservice.authz.service.TemplateProposalService;
+import com.flowbinary.platformservice.repository.TenantUserRepository;
 import com.flowbinary.platformservice.authz.service.RoleAdminService;
 import com.flowbinary.platformservice.authz.web.AuthzDtos.*;
 import com.flowbinary.platformservice.model.Tenant;
@@ -19,6 +22,9 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import com.flowbinary.platformservice.model.TenantUser;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
@@ -38,6 +44,9 @@ public class AuthzController {
     private final EffectivePermissionService permissions;
     private final RoleAdminService roleAdmin;
     private final MembershipService memberships;
+    private final PlatformMembershipService platformMembers;
+    private final TemplateProposalService proposals;
+    private final TenantUserRepository tenantUsers;
 
     // ── Effective permissions ────────────────────────────────────────────
 
@@ -55,6 +64,14 @@ public class AuthzController {
         Tenant tenant = tenants.findByTenantId(tenantId)
                 .orElseThrow(() -> new NoSuchElementException("Tenant not found: " + tenantId));
         return PermissionsResponse.of(permissions.forTenant(tenant.getId(), sub));
+    }
+
+    /** For other services' SDKs: what an operator may do on the platform. */
+    @GetMapping("/principals/{sub}/platform/permissions")
+    @PreAuthorize("@jwtClientValidator.isAllowed(authentication)")
+    @Operation(summary = "A user's platform (operator) privileges (service clients only)")
+    PermissionsResponse platformPermissions(@PathVariable UUID sub) {
+        return PermissionsResponse.of(permissions.forPlatform(sub));
     }
 
     // ── Catalogue and templates ──────────────────────────────────────────
@@ -114,9 +131,18 @@ public class AuthzController {
     @GetMapping("/memberships")
     @RequiresPrivilege("platform.member.manage")
     List<MembershipResponse> memberships(Authentication auth) {
-        return memberships.list(tenant(auth)).stream()
-                .map(m -> MembershipResponse.of(m, memberships.assignmentsOf(m.getId())))
-                .toList();
+        Tenant tenant = tenant(auth);
+        List<com.flowbinary.platformservice.authz.model.Membership> found = memberships.list(tenant);
+        Map<UUID, TenantUser> people = tenantUsers
+                .findByTenantIdAndAuthUserIdIn(tenant.getId(), found.stream().map(m -> m.getUserSub()).toList()).stream()
+                .collect(Collectors.toMap(TenantUser::getAuthUserId, u -> u, (a, b) -> a));
+        return found.stream().map(m -> {
+            TenantUser u = people.get(m.getUserSub());
+            String name = u == null ? null : ((u.getFirstName() == null ? "" : u.getFirstName()) + " "
+                    + (u.getLastName() == null ? "" : u.getLastName())).trim();
+            return MembershipResponse.of(m, memberships.assignmentsOf(m.getId()), name == null || name.isBlank() ? null : name,
+                    u == null ? null : u.getEmail());
+        }).toList();
     }
 
     @PutMapping("/memberships/{id}/assignments")
@@ -126,7 +152,7 @@ public class AuthzController {
                                           @RequestBody AssignmentsRequest req) {
         Tenant tenant = tenant(auth);
         var saved = memberships.replaceAssignments(tenant, id, req.toChange(), authz.current(auth), actor(auth));
-        return MembershipResponse.of(memberships.get(tenant, id), saved);
+        return MembershipResponse.of(memberships.get(tenant, id), saved, null, null);
     }
 
     @GetMapping("/memberships/{id}/explain")
@@ -134,6 +160,64 @@ public class AuthzController {
     @Operation(summary = "Why a member has or lacks a privilege")
     MembershipService.Explanation explain(Authentication auth, @PathVariable UUID id, @RequestParam String privilege) {
         return memberships.explain(tenant(auth), id, privilege);
+    }
+
+    // ── Service manifests: operator side ─────────────────────────────────
+
+    public record RejectRequest(String reason) {
+    }
+
+    @GetMapping("/services")
+    @RequiresPrivilege("platform.template.manage")
+    @Operation(summary = "Services that declare privileges, with counts and the last manifest")
+    List<TemplateProposalService.ServiceSummary> services() {
+        return proposals.services();
+    }
+
+    @GetMapping("/proposals")
+    @RequiresPrivilege("platform.template.manage")
+    @Operation(summary = "Template grants services have proposed")
+    List<TemplateProposalService.ProposalView> proposals(@RequestParam(required = false) String status) {
+        return proposals.list(status);
+    }
+
+    @PostMapping("/proposals/{id}/approve")
+    @RequiresPrivilege("platform.template.manage")
+    @Operation(summary = "Add the proposed privilege to the template")
+    TemplateProposalService.ProposalView approve(Authentication auth, @PathVariable UUID id) {
+        return proposals.approve(id, actor(auth));
+    }
+
+    @PostMapping("/proposals/{id}/reject")
+    @RequiresPrivilege("platform.template.manage")
+    TemplateProposalService.ProposalView reject(Authentication auth, @PathVariable UUID id, @RequestBody(required = false) RejectRequest req) {
+        return proposals.reject(id, actor(auth), req == null ? null : req.reason());
+    }
+
+    // ── Platform operators ───────────────────────────────────────────────
+
+    public record OperatorRequest(List<String> roles) {
+    }
+
+    @GetMapping("/platform/members")
+    @RequiresPrivilege("platform.operator.manage")
+    @Operation(summary = "Platform operators and their platform roles")
+    List<PlatformMembershipService.Operator> operators() {
+        return platformMembers.list();
+    }
+
+    @GetMapping("/platform/roles")
+    @RequiresPrivilege("platform.operator.manage")
+    List<String> platformRoles() {
+        return platformMembers.platformRoles().stream().map(r -> r.getCode()).toList();
+    }
+
+    @PutMapping("/platform/members/{sub}")
+    @RequiresPrivilege("platform.operator.manage")
+    @Operation(summary = "Make a user an operator with these platform roles (first is primary); an empty list removes them")
+    PlatformMembershipService.Operator setOperator(Authentication auth, @PathVariable UUID sub,
+                                                   @RequestBody OperatorRequest req) {
+        return platformMembers.set(sub, req.roles(), actor(auth));
     }
 
     // ── helpers ──────────────────────────────────────────────────────────

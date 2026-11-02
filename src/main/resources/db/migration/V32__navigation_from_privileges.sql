@@ -7,6 +7,13 @@
 -- See Docs/design/authorization-architecture.md §19.
 -- ============================================================
 
+-- Stored drafts and history may hold the retired operations, which could no longer be read
+-- back. Remove just those operations from the lists; everything else stays.
+UPDATE menu_change_sets
+   SET ops = COALESCE((SELECT jsonb_agg(o) FROM jsonb_array_elements(ops) AS o
+                       WHERE o->>'op' NOT IN ('SET_ROLES', 'SET_GROUP_ACCESS')), '[]'::jsonb)
+ WHERE ops::text LIKE '%"SET_ROLES"%' OR ops::text LIKE '%"SET_GROUP_ACCESS"%';
+
 -- The seeded "User groups" screen needs the retired group.manage privilege.
 UPDATE menu_items
    SET is_active = false, deleted_at = now()

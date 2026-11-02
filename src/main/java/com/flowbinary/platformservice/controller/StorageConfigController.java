@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.controller;
 
+import com.flowbinary.platformservice.authz.sdk.RequiresPrivilege;
 import com.flowbinary.platformservice.config.StorageProperties;
 import com.flowbinary.platformservice.dto.storage.StorageConfigRequest;
 import com.flowbinary.platformservice.dto.storage.StorageConfigResponse;
@@ -27,6 +28,7 @@ public class StorageConfigController {
     private final StorageProperties     storageProperties;
 
     @GetMapping
+    @RequiresPrivilege("platform.storage.manage")
     @Operation(summary = "Get current tenant storage configuration and quota usage")
     StorageConfigResponse getConfig(Authentication authentication) {
         Tenant tenant             = tenantContextResolver.resolveRequired(authentication);
@@ -36,7 +38,7 @@ public class StorageConfigController {
 
     @PutMapping
     @ResponseStatus(HttpStatus.OK)
-    @PreAuthorize("hasAnyAuthority('ROLE_SUPERADMIN','ROLE_TENANTADMIN')")
+    @RequiresPrivilege("platform.storage.manage")
     @Operation(summary = "Update tenant storage backend, credentials, or quota")
     StorageConfigResponse updateConfig(
             Authentication authentication,

@@ -11,7 +11,7 @@ import com.flowbinary.platformservice.repository.ApplicationRepository;
 import com.flowbinary.platformservice.repository.MenuItemRepository;
 import com.flowbinary.platformservice.repository.MenuModuleManifestRepository;
 import com.flowbinary.platformservice.repository.MenuModuleRepository;
-import com.flowbinary.platformservice.repository.PrivilegeRepository;
+import com.flowbinary.platformservice.authz.repository.AuthzPrivilegeRepository;
 import com.flowbinary.platformservice.service.MenuAdminAccess.AdminContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -46,7 +46,7 @@ public class MenuModuleRegistryService {
     private final MenuModuleManifestRepository history;
     private final MenuItemRepository           items;
     private final ApplicationRepository        applications;
-    private final PrivilegeRepository          privileges;
+    private final AuthzPrivilegeRepository     privileges;
     private final AuditService                 audit;
     private final MenuCatalogEvents            events;
     private final MenuMetrics                  metrics;
@@ -215,9 +215,8 @@ public class MenuModuleRegistryService {
 
     private void checkPrivilegeModule(String moduleCode) {
         if (moduleCode == null || moduleCode.isBlank()) return;
-        boolean known = privileges.findByIsActiveTrueOrderByCategoryAscCodeAsc().stream()
-                .anyMatch(p -> moduleCode.equals(p.getModuleCode()));
-        if (!known) throw new MenuDraftException(-1, "privilegeModuleCode '" + moduleCode + "' matches no privilege");
+        boolean known = privileges.findAll().stream().anyMatch(p -> moduleCode.equals(p.getOwnerService()));
+        if (!known) throw new MenuDraftException(-1, "privilegeModuleCode '" + moduleCode + "' matches no service that owns privileges");
     }
 
     private void checkUrl(String url) {

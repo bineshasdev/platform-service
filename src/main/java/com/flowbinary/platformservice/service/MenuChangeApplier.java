@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.model.AuthzPrivilege;
 import com.flowbinary.platformservice.exception.MenuDraftException;
 import com.flowbinary.platformservice.exception.MenuHierarchyException;
 import com.flowbinary.platformservice.model.*;
@@ -397,9 +398,10 @@ public class MenuChangeApplier {
         return out;
     }
 
-    private Privilege privilegeOrNull(int i, String code) {
+    private String privilegeOrNull(int i, String code) {
         if (code == null || code.isBlank()) return null;
-        return refs.privilege(code).orElseThrow(() -> new MenuDraftException(i, "Unknown privilege '" + code + "'"));
+        return refs.privilege(code).map(AuthzPrivilege::getCode)
+                .orElseThrow(() -> new MenuDraftException(i, "Unknown privilege '" + code + "'"));
     }
 
     private String featureOrNull(int i, String code) {

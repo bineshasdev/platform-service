@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.controller;
 
+import com.flowbinary.platformservice.authz.sdk.RequiresPrivilege;
 import com.flowbinary.platformservice.dto.plan.PlanResponse;
 import com.flowbinary.platformservice.dto.plan.UpgradeRequest;
 import com.flowbinary.platformservice.dto.plan.UpgradeResponse;
@@ -36,6 +37,7 @@ public class PlanController {
      * Upgrades the authenticated tenant's subscription to the target plan.
      */
     @PostMapping("/upgrade")
+    @RequiresPrivilege("platform.subscription.manage")
     @Operation(summary = "Upgrade or change the tenant's subscription plan")
     UpgradeResponse upgrade(Authentication authentication,
                             @Valid @RequestBody UpgradeRequest request) {

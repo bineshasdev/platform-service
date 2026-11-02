@@ -185,7 +185,7 @@ final class NotificationEventMapper {
         put(data, KEY_EMAIL,     evt.getEmail());
         put(data, KEY_FIRST_NAME, evt.getFirstName());
         put(data, KEY_LAST_NAME,  evt.getLastName());
-        put(data, KEY_ROLE,      evt.getRole() != null ? evt.getRole().name() : null);
+        put(data, KEY_ROLE,      evt.getRole());
         put(data, KEY_TENANT_ID, evt.getTenantId());
 
         EventAudience audience = userAudience(
@@ -200,7 +200,7 @@ final class NotificationEventMapper {
         put(data, KEY_EMAIL,      evt.getEmail());
         put(data, KEY_FIRST_NAME, evt.getFirstName());
         put(data, KEY_LAST_NAME,  evt.getLastName());
-        put(data, KEY_ROLE,       evt.getRole() != null ? evt.getRole().name() : null);
+        put(data, KEY_ROLE,       evt.getRole());
         put(data, "status",       evt.getStatus());
         put(data, KEY_TENANT_ID,  evt.getTenantId());
         put(data, "changedFields", evt.getChangedFields() != null
@@ -218,7 +218,7 @@ final class NotificationEventMapper {
         put(data, KEY_EMAIL,     evt.getEmail());
         put(data, KEY_FIRST_NAME, evt.getFirstName());
         put(data, KEY_LAST_NAME,  evt.getLastName());
-        put(data, KEY_ROLE,      evt.getRole() != null ? evt.getRole().name() : null);
+        put(data, KEY_ROLE,      evt.getRole());
         put(data, KEY_TENANT_ID, evt.getTenantId());
 
         // The deleted user can no longer receive notifications — notify tenant admins

@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.model.AuthzPrivilege;
 import com.flowbinary.platformservice.dto.menu.TemporaryMenuRequest;
 import com.flowbinary.platformservice.dto.menu.TemporaryMenuRequest.Audience;
 import com.flowbinary.platformservice.dto.menu.TemporaryMenuResponse;
@@ -177,6 +178,7 @@ public class TemporaryMenuService {
         item.setAudienceMode(MenuAudienceMode.valueOf(mode));
 
         item.setRequiredPrivilege(blank(req.requiredPrivilege()) ? null : refs.privilege(req.requiredPrivilege())
+                .map(AuthzPrivilege::getCode)
                 .orElseThrow(() -> new MenuDraftException(-1, "Unknown privilege '" + req.requiredPrivilege() + "'")));
         if (!blank(req.requiredFeature()) && !refs.featureExists(req.requiredFeature())) {
             throw new MenuDraftException(-1, "Unknown feature '" + req.requiredFeature() + "'");
@@ -319,7 +321,7 @@ public class TemporaryMenuService {
                 m.getType().name(), m.getTarget().name(), m.getParent() == null ? null : m.getParent().getCode(),
                 m.getSortOrder(), m.getPriority(), m.getBadge(), m.getLifecycleStatus().name(),
                 m.getStartsAt(), m.getEndsAt(), m.isLiveAt(now),
-                m.getRequiredPrivilege() == null ? null : m.getRequiredPrivilege().getCode(), m.getRequiredFeature(),
+                m.getRequiredPrivilege(), m.getRequiredFeature(),
                 m.getAudienceMode().name(),
                 users.getOrDefault(m.getId(), List.of()).stream().map(x -> x.getUser().getId()).sorted().toList(),
                 m.getCreatedBy())).toList();

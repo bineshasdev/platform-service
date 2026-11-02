@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.flowbinary.platformservice.dto.bootstrap.BootstrapResponse;
 import com.flowbinary.platformservice.service.BootstrapService;
 import com.flowbinary.platformservice.service.MenuResolutionService;
@@ -22,6 +23,7 @@ public class BootstrapController {
     private final BootstrapService bootstrapService;
 
     @GetMapping
+    @PreAuthorize("@authz.member(authentication)")
     @Operation(
         summary = "Load UI bootstrap data",
         description = """

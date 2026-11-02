@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.controller;
 
+import com.flowbinary.platformservice.authz.sdk.RequiresPrivilege;
 import com.flowbinary.platformservice.dto.registration.CredentialRequest;
 import com.flowbinary.platformservice.dto.registration.CredentialResponse;
 import com.flowbinary.platformservice.dto.registration.VerificationDecisionRequest;
@@ -29,7 +30,7 @@ public class TenantCredentialController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("@authz.hasInTenant(authentication, 'platform.settings.manage', #tenantId)")
     @Operation(summary = "Attach a licence / credential",
             description = "Upload the certificate first via POST /api/v1/files (fileType DOCUMENT), "
                     + "then pass its id as documentFileId.")
@@ -39,7 +40,7 @@ public class TenantCredentialController {
     }
 
     @GetMapping
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("@authz.hasInTenant(authentication, 'platform.settings.manage', #tenantId)")
     @Operation(summary = "List the tenant's credentials")
     List<CredentialResponse> list(@PathVariable UUID tenantId) {
         return credentialService.list(tenantId);
@@ -47,14 +48,14 @@ public class TenantCredentialController {
 
     @DeleteMapping("/{credentialId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("@authz.hasInTenant(authentication, 'platform.settings.manage', #tenantId)")
     @Operation(summary = "Remove a not-yet-verified credential")
     void delete(@PathVariable UUID tenantId, @PathVariable UUID credentialId) {
         credentialService.delete(tenantId, credentialId);
     }
 
     @PostMapping("/{credentialId}/review")
-    @PreAuthorize("hasAuthority('ROLE_SUPERADMIN')")
+    @RequiresPrivilege("platform.tenant.verify")
     @Operation(summary = "Approve or reject a single credential (platform operator)")
     CredentialResponse review(@PathVariable UUID tenantId,
                               @PathVariable UUID credentialId,

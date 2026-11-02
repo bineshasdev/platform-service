@@ -17,6 +17,10 @@ public interface AuthzRoleRepository extends JpaRepository<AuthzRole, UUID> {
 
     List<AuthzRole> findByIdIn(Collection<UUID> ids);
 
+    List<AuthzRole> findByTenantIdIsNullOrderByNameAsc();
+
+    Optional<AuthzRole> findByTenantIdIsNullAndCode(String code);
+
     Optional<AuthzRole> findByTenantIdAndCode(UUID tenantId, String code);
 
     Optional<AuthzRole> findByTenantIdAndTemplateIdAndKind(UUID tenantId, UUID templateId, RoleKind kind);

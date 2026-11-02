@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.controller;
 
+import com.flowbinary.platformservice.authz.sdk.RequiresPrivilege;
 import com.flowbinary.platform.event.avro.AudienceScope;
 import com.flowbinary.platform.event.avro.EventAudience;
 import com.flowbinary.platform.event.avro.NotificationEvent;
@@ -32,12 +33,12 @@ import java.util.UUID;
  * onto {@code platform.notification.events} without going through a real user/tenant
  * lifecycle operation.
  * <p>
- * Restricted to {@code ROLE_SUPERADMIN}.
+ * Restricted to platform operators ({@code platform.tenant.manage}).
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/test/notifications")
-//@PreAuthorize("hasAuthority('ROLE_SUPERADMIN')")
+@RequiresPrivilege("platform.tenant.manage")
 @Tag(name = "Test", description = "Developer / QA test utilities")
 public class NotificationTestController {
 

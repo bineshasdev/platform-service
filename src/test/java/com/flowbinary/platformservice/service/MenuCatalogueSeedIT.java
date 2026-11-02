@@ -1,11 +1,15 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.model.AuthzRole;
+import com.flowbinary.platformservice.authz.repository.AuthzRoleRepository;
+import com.flowbinary.platformservice.authz.sdk.PermissionCache;
+import com.flowbinary.platformservice.authz.service.EffectivePermissionService;
+import com.flowbinary.platformservice.authz.service.Operators;
+import com.flowbinary.platformservice.authz.service.TenantFeatures;
 import com.flowbinary.platformservice.config.AppProperties;
 import com.flowbinary.platformservice.config.JpaConfig;
 import com.flowbinary.platformservice.dto.bootstrap.MenuEntry;
-import com.flowbinary.platformservice.model.Role;
 import com.flowbinary.platformservice.model.Tenant;
-import com.flowbinary.platformservice.repository.RoleRepository;
 import com.flowbinary.platformservice.repository.TenantRepository;
 import com.flowbinary.platformservice.security.TenantContextResolver;
 import org.junit.jupiter.api.AfterEach;
@@ -37,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Import({JpaConfig.class, AppProperties.class, MenuResolutionService.class, MenuCatalogueCache.class,
         MenuCatalogueCompiler.class, MenuMetrics.class, MenuCatalogEvents.class, SettingsResolver.class,
-        TenantContextResolver.class})
+        TenantContextResolver.class, EffectivePermissionService.class, TenantFeatures.class, PermissionCache.class, Operators.class})
 class MenuCatalogueSeedIT {
 
     @DynamicPropertySource
@@ -50,7 +54,7 @@ class MenuCatalogueSeedIT {
 
     @Autowired JdbcTemplate jdbc;
     @Autowired MenuResolutionService resolution;
-    @Autowired RoleRepository roles;
+    @Autowired AuthzRoleRepository roles;
     @Autowired TenantRepository tenants;
 
     @BeforeEach
@@ -71,8 +75,9 @@ class MenuCatalogueSeedIT {
         return tenants.findById(id).orElseThrow();
     }
 
-    private Set<String> leftTop(String app, Tenant tenant, String roleCode) {
-        Role role = roles.findByTenantIsNullAndCode(roleCode).orElseThrow();
+    private Set<String> leftTop(String app, Tenant tenant, String templateCode) {
+        AuthzTestSupport.provision(jdbc, tenant.getId());
+        AuthzRole role = roles.findByTenantIdAndCode(tenant.getId(), templateCode).orElseThrow();
         List<MenuEntry> tree = resolution.resolveForRole(role,
                 new MenuResolutionService.MenuContext(tenant, null, app, "enterprise", Set.of(), "en"));
         // other integration tests share the database and leave their own items behind; only the seed is under test
@@ -105,19 +110,17 @@ class MenuCatalogueSeedIT {
         record Case(String label, Tenant t, String role, Set<String> top) {
         }
         List<Case> cases = List.of(
-                new Case("CLINIC_ADMIN/clinic", clinic, "CLINIC_ADMIN", set("home", "schedule", "patients", "billing", "claims", "network", "referrals", "ai_review", "reports", "compliance", "settings")),
-                new Case("DOCTOR/clinic", clinic, "DOCTOR", set("home", "schedule", "patients", "encounters", "inbox", "orders", "telehealth", "monitoring", "referrals", "network", "ai_review", "reports")),
-                new Case("NURSE/clinic", clinic, "NURSE", set("home", "schedule", "patients", "encounters", "inbox", "orders", "monitoring", "referrals", "network")),
-                new Case("RECEPTIONIST/clinic", clinic, "RECEPTIONIST", set("home", "schedule", "patients", "billing")),
-                new Case("MEDICAL_CODER/clinic", clinic, "MEDICAL_CODER", set("home", "coding", "ai_review", "encounters", "inbox", "reports")),
-                new Case("BILLING_STAFF/clinic", clinic, "BILLING_STAFF", set("home", "patients", "billing", "claims", "reports", "settings")),
-                new Case("BILLING_STAFF/lab", lab, "BILLING_STAFF", set("home", "billing", "reports", "settings")),
-                new Case("COMPLIANCE_OFFICER/clinic", clinic, "COMPLIANCE_OFFICER", set("home", "compliance", "reports", "settings")),
-                new Case("COMPLIANCE_OFFICER/lab", lab, "COMPLIANCE_OFFICER", set("home", "compliance", "reports", "settings")),
-                new Case("LAB_ADMIN/lab", lab, "LAB_ADMIN", with(LAB_ALL, "home", "billing", "reports", "settings")),
-                new Case("LAB_TECHNICIAN/lab", lab, "LAB_TECHNICIAN", with(new String[]{"lab.samples", "lab.home_collection", "lab.worklist", "lab.results", "lab.tat"}, "home")),
-                new Case("PHLEBOTOMIST/lab", lab, "PHLEBOTOMIST", set("home", "lab.samples", "lab.home_collection")),
-                new Case("PHARMACIST/store", store, "PHARMACIST", with(PHARM_ALL, "home", "billing", "settings")));
+                new Case("clinic_admin/clinic", clinic, "clinic_admin", set("home", "schedule", "patients", "billing", "claims", "network", "referrals", "ai_review", "reports", "compliance", "settings")),
+                new Case("doctor/clinic", clinic, "doctor", set("home", "schedule", "patients", "encounters", "inbox", "orders", "telehealth", "monitoring", "referrals", "network", "ai_review", "reports")),
+                new Case("nurse/clinic", clinic, "nurse", set("home", "schedule", "patients", "encounters", "inbox", "orders", "monitoring", "referrals", "network")),
+                new Case("receptionist/clinic", clinic, "receptionist", set("home", "schedule", "patients", "billing")),
+                new Case("medical_coder/clinic", clinic, "medical_coder", set("home", "coding", "ai_review", "encounters", "inbox", "reports")),
+                new Case("billing_staff/clinic", clinic, "billing_staff", set("home", "patients", "billing", "claims", "reports", "settings")),
+                new Case("compliance_officer/clinic", clinic, "compliance_officer", set("home", "compliance", "reports", "settings")),
+                new Case("lab_admin/lab", lab, "lab_admin", with(LAB_ALL, "home", "billing", "reports", "settings")),
+                new Case("lab_technician/lab", lab, "lab_technician", with(new String[]{"lab.samples", "lab.home_collection", "lab.worklist", "lab.results", "lab.tat"}, "home")),
+                new Case("phlebotomist/lab", lab, "phlebotomist", set("home", "lab.samples", "lab.home_collection")),
+                new Case("pharmacist/store", store, "pharmacist", with(PHARM_ALL, "home", "billing", "settings")));
 
         for (Case c : cases) {
             expected.put(c.label(), c.top());

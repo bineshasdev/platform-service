@@ -5,7 +5,7 @@ import com.flowbinary.platformservice.dto.registration.PatientRegistrationReques
 import com.flowbinary.platformservice.dto.registration.PatientRegistrationResponse;
 import com.flowbinary.platformservice.event.PatientRegisteredEvent;
 import com.flowbinary.platformservice.messaging.PlatformEventPublisher;
-import com.flowbinary.platformservice.model.PlatformRole;
+import com.flowbinary.platformservice.model.PrincipalType;
 import com.flowbinary.platformservice.repository.PatientRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,7 +46,7 @@ public class PatientRegistrationService {
             keycloakUserId = keycloak.createUser(email, email,
                     request.getFirstName(), request.getLastName(),
                     request.getPassword(), false);
-            keycloak.assignRealmRole(keycloakUserId, PlatformRole.PATIENT);
+            keycloak.assignRealmRole(keycloakUserId, PrincipalType.PATIENT);
 
             Patient patient = new Patient();
             patient.setAuthUserId(UUID.fromString(keycloakUserId));

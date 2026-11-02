@@ -1,5 +1,7 @@
 package com.flowbinary.platformservice.controller;
 
+import com.flowbinary.platformservice.authz.sdk.Authz;
+import com.flowbinary.platformservice.authz.sdk.RequiresPrivilege;
 import com.flowbinary.platformservice.dto.user.ResetCredentialRequest;
 import com.flowbinary.platformservice.dto.user.UserCreateRequest;
 import com.flowbinary.platformservice.dto.user.UserResponse;
@@ -31,8 +33,10 @@ public class UserController {
 
     private final UserService           userService;
     private final TenantContextResolver tenantContextResolver;
+    private final Authz                 authz;
 
     @GetMapping("/me")
+    @PreAuthorize("@authz.member(authentication)")
     @Operation(summary = "Get the current authenticated user's own profile")
     UserResponse getMe(Authentication authentication) {
         Tenant tenant     = tenantContextResolver.resolveRequired(authentication);
@@ -41,6 +45,7 @@ public class UserController {
     }
 
     @PatchMapping("/me")
+    @PreAuthorize("@authz.member(authentication)")
     @Operation(summary = "Update the current user's own profile (name, mobile)")
     UserResponse updateMe(
             Authentication authentication,
@@ -51,6 +56,7 @@ public class UserController {
     }
 
     @GetMapping
+    @RequiresPrivilege("platform.member.view")
     @Operation(summary = "List users for the current tenant (paginated)")
     Page<UserResponse> listUsers(
             Authentication authentication,
@@ -65,16 +71,21 @@ public class UserController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @RequiresPrivilege("platform.member.invite")
     @Operation(summary = "Create a new user under the current tenant")
     UserResponse createUser(
             Authentication authentication,
             @Valid @RequestBody UserCreateRequest request) {
         Tenant tenant = tenantContextResolver.resolveRequired(authentication);
+        // Choosing a role is assigning access: inviting someone is not enough for that.
+        if (request.getPrimaryRoleId() != null && !authz.has(authentication, "platform.member.manage")) {
+            throw new org.springframework.security.access.AccessDeniedException("Choosing a role needs platform.member.manage");
+        }
         return userService.createUser(tenant, request);
     }
 
     @PatchMapping("/{id}")
-    //@PreAuthorize("hasAnyAuthority('ROLE_SUPERADMIN','ROLE_TENANTADMIN', 'ROLE_USER')")
+    @RequiresPrivilege("platform.member.manage")
     @Operation(summary = "Update a user's profile, role, or status")
     UserResponse updateUser(
             Authentication authentication,
@@ -85,6 +96,7 @@ public class UserController {
     }
 
     @PostMapping(value = "/{id}/profile-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("@authz.member(authentication)")
     @Operation(summary = "Upload or replace a user's profile image")
     UserResponse uploadProfileImage(
             Authentication authentication,
@@ -92,12 +104,12 @@ public class UserController {
             @RequestPart("file") MultipartFile file) {
         Tenant tenant   = tenantContextResolver.resolveRequired(authentication);
         UUID   callerId = extractUserId(authentication);
-        return userService.uploadProfileImage(tenant, id, callerId, file);
+        return userService.uploadProfileImage(tenant, id, callerId, authz.has(authentication, "platform.member.manage"), file);
     }
 
     @PostMapping("/{id}/reset-credentials")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @PreAuthorize("hasAnyAuthority('ROLE_SUPERADMIN','ROLE_TENANTADMIN','ROLE_CLINIC_ADMIN')")
+    @RequiresPrivilege("platform.member.manage")
     @Operation(summary = "Reset a user's password (issues a temporary password by default)")
     void resetCredentials(
             Authentication authentication,
@@ -109,6 +121,7 @@ public class UserController {
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @RequiresPrivilege("platform.member.manage")
     @Operation(summary = "Delete a user from the current tenant")
     void deleteUser(
             Authentication authentication,

@@ -1,6 +1,8 @@
 package com.flowbinary.platformservice.service;
 
-import com.flowbinary.platformservice.authz.service.LegacyRoleBridge;
+import com.flowbinary.platformservice.model.PrincipalType;
+import com.flowbinary.platformservice.authz.service.PrimaryRoles;
+import com.flowbinary.platformservice.authz.service.TenantOnboarding;
 import com.flowbinary.platformservice.config.KeycloakProperties;
 import com.flowbinary.platformservice.dto.user.ResetCredentialRequest;
 import com.flowbinary.platformservice.dto.user.UserCreateRequest;
@@ -10,7 +12,6 @@ import com.flowbinary.platformservice.event.UserCreatedEvent;
 import com.flowbinary.platformservice.event.UserDeletedEvent;
 import com.flowbinary.platformservice.event.UserUpdatedEvent;
 import com.flowbinary.platformservice.messaging.PlatformEventPublisher;
-import com.flowbinary.platformservice.model.PlatformRole;
 import com.flowbinary.platformservice.model.Tenant;
 import com.flowbinary.platformservice.model.TenantUser;
 import com.flowbinary.platformservice.repository.TenantUserRepository;
@@ -32,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -48,7 +50,8 @@ public class UserService {
     private final KeycloakProperties        kcProps;
     private final FileStorageService        fileStorageService;
     private final PlatformEventPublisher    eventPublisher;
-    private final LegacyRoleBridge          authzBridge;
+    private final TenantOnboarding          onboarding;
+    private final PrimaryRoles              primaryRoles;
 
     // ── Me ─────────────────────────────────────────────────────────────────
 
@@ -82,7 +85,7 @@ public class UserService {
                 .email(user.getEmail())
                 .firstName(user.getFirstName())
                 .lastName(user.getLastName())
-                .role(user.getRole())
+                .role(primaryRoles.code(tenant.getId(), user.getAuthUserId()))
                 .status(user.getStatus())
                 .changedFields(changedFields)
                 .build();
@@ -101,8 +104,9 @@ public class UserService {
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
         PageRequest pageable = PageRequest.of(page, size, sort);
-        return tenantUserRepository.searchByTenant(tenant.getId(), search, pageable)
-                .map(u -> toResponse(u, tenant.getId()));
+        Page<TenantUser> found = tenantUserRepository.searchByTenant(tenant.getId(), search, pageable);
+        Map<UUID, String> roles = primaryRoles.codes(tenant.getId(), found.getContent().stream().map(TenantUser::getAuthUserId).toList());
+        return found.map(u -> toResponse(u, tenant.getId(), roles.get(u.getAuthUserId())));
     }
 
     // ── Create ─────────────────────────────────────────────────────────────
@@ -131,7 +135,7 @@ public class UserService {
             addMemberToOrganisation(realm, tenant.getTenantId(), kcUserId);
 
             // 3. Assign realm role
-            assignRealmRole(realm, kcUserId, request.getRole());
+            assignRealmRole(realm, kcUserId, PrincipalType.TENANT_MEMBER);
 
             // 4. Persist TenantUser
             TenantUser user = TenantUser.builder()
@@ -142,12 +146,11 @@ public class UserService {
                     .username(username)
                     .firstName(request.getFirstName())
                     .lastName(request.getLastName())
-                    .role(request.getRole())
                     .mobile(request.getMobile())
                     .status("ACTIVE")
                     .build();
             user = tenantUserRepository.save(user);
-            authzBridge.onUserCreated(tenant, user.getAuthUserId(), user.getRole());
+            String primaryRole = onboarding.onMemberCreated(tenant, user.getAuthUserId(), request.getPrimaryRoleId(), null);
 
             log.info("User created: email={} tenantId={} kcUserId={}", request.getEmail(), tenant.getId(), kcUserId);
 
@@ -161,11 +164,11 @@ public class UserService {
                     .email(user.getEmail())
                     .firstName(user.getFirstName())
                     .lastName(user.getLastName())
-                    .role(user.getRole())
+                    .role(primaryRole)
                     .build();
             eventPublisher.publishUserCreated(createdEvt);
 
-            return toResponse(user, tenant.getId());
+            return toResponse(user, tenant.getId(), primaryRole);
 
         } catch (Exception ex) {
             log.error("User creation failed for email='{}': {}", request.getEmail(), ex.getMessage(), ex);
@@ -189,20 +192,14 @@ public class UserService {
                 .filter(u -> u.getTenant().getId().equals(tenant.getId()))
                 .orElseThrow(() -> new IllegalArgumentException(USER_NOT_FOUND + userId));
 
-        if (request.getRole() == PlatformRole.SUPERADMIN) {
-            throw new IllegalArgumentException("Cannot assign SUPERADMIN role via this endpoint");
-        }
-
         List<String> changedFields = collectChangedFields(user, request);
 
         RealmResource realm = keycloakAdmin.realm(kcProps.getAppRealm());
         syncKeycloakName(realm, user, request);
-        syncKeycloakRole(realm, user, request);
         applyFieldUpdates(user, request);
 
         user = tenantUserRepository.save(user);
-        if (changedFields.contains("role"))   authzBridge.onUserRoleChanged(tenant, user.getAuthUserId(), user.getRole());
-        if (changedFields.contains("status")) authzBridge.onUserStatusChanged(tenant, user.getAuthUserId(), user.getStatus());
+        if (changedFields.contains("status")) onboarding.onUserStatusChanged(tenant, user.getAuthUserId(), user.getStatus());
         log.info("User updated: id={} tenantId={} changed={}", userId, tenant.getId(), changedFields);
 
         UserUpdatedEvent updatedEvt = UserUpdatedEvent.builder()
@@ -214,7 +211,7 @@ public class UserService {
                 .email(user.getEmail())
                 .firstName(user.getFirstName())
                 .lastName(user.getLastName())
-                .role(user.getRole())
+                .role(primaryRoles.code(tenant.getId(), user.getAuthUserId()))
                 .status(user.getStatus())
                 .changedFields(changedFields)
                 .build();
@@ -252,7 +249,6 @@ public class UserService {
         List<String> changed = new ArrayList<>();
         if (request.getFirstName() != null && !request.getFirstName().equals(user.getFirstName())) changed.add("firstName");
         if (request.getLastName()  != null && !request.getLastName().equals(user.getLastName()))   changed.add("lastName");
-        if (request.getRole()      != null && request.getRole() != user.getRole())                 changed.add("role");
         if (request.getMobile()    != null && !request.getMobile().equals(user.getMobile()))       changed.add("mobile");
         if (request.getStatus()    != null && !request.getStatus().equals(user.getStatus()))       changed.add("status");
         return changed;
@@ -267,22 +263,9 @@ public class UserService {
         realm.users().get(kcId).update(ur);
     }
 
-    private void syncKeycloakRole(RealmResource realm, TenantUser user, UserUpdateRequest request) {
-        if (request.getRole() == null || request.getRole() == user.getRole()) return;
-        String kcId = user.getAuthUserId().toString();
-        try {
-            RoleRepresentation oldRole = realm.roles().get(user.getRole().roleName()).toRepresentation();
-            realm.users().get(kcId).roles().realmLevel().remove(List.of(oldRole));
-        } catch (Exception ex) {
-            log.warn("Could not remove old role '{}' for user {}: {}", user.getRole(), user.getId(), ex.getMessage());
-        }
-        assignRealmRole(realm, kcId, request.getRole());
-    }
-
     private static void applyFieldUpdates(TenantUser user, UserUpdateRequest request) {
         if (request.getFirstName() != null) user.setFirstName(request.getFirstName());
         if (request.getLastName()  != null) user.setLastName(request.getLastName());
-        if (request.getRole()      != null) user.setRole(request.getRole());
         if (request.getMobile()    != null) user.setMobile(request.getMobile());
         if (request.getStatus()    != null) user.setStatus(request.getStatus());
     }
@@ -325,7 +308,7 @@ public class UserService {
         }
 
         tenantUserRepository.delete(user);
-        authzBridge.onUserDeleted(tenant, user.getAuthUserId());
+        onboarding.onUserDeleted(tenant, user.getAuthUserId());
         log.info("Deleted user: id={} email={}", userId, user.getEmail());
 
         UserDeletedEvent deletedEvt = UserDeletedEvent.builder()
@@ -337,7 +320,7 @@ public class UserService {
                 .email(user.getEmail())
                 .firstName(user.getFirstName())
                 .lastName(user.getLastName())
-                .role(user.getRole())
+                .role(primaryRoles.code(tenant.getId(), user.getAuthUserId()))
                 .build();
         eventPublisher.publishUserDeleted(deletedEvt);
     }
@@ -383,10 +366,10 @@ public class UserService {
         }
     }
 
-    private void assignRealmRole(RealmResource realm, String userId, PlatformRole platformRole) {
-        RoleRepresentation role = realm.roles().get(platformRole.roleName()).toRepresentation();
+    private void assignRealmRole(RealmResource realm, String userId, PrincipalType principalType) {
+        RoleRepresentation role = realm.roles().get(principalType.roleName()).toRepresentation();
         realm.users().get(userId).roles().realmLevel().add(List.of(role));
-        log.debug("Assigned realm role '{}' to user {}", platformRole.roleName(), userId);
+        log.debug("Assigned realm role '{}' to user {}", principalType.roleName(), userId);
     }
 
     // ── Mapping ────────────────────────────────────────────────────────────
@@ -396,10 +379,14 @@ public class UserService {
     @Transactional
     public UserResponse uploadProfileImage(Tenant tenant, UUID userId,
                                            UUID callerId,
+                                           boolean canManageMembers,
                                            org.springframework.web.multipart.MultipartFile file) {
         TenantUser user = tenantUserRepository.findById(userId)
                 .filter(u -> u.getTenant().getId().equals(tenant.getId()))
                 .orElseThrow(() -> new IllegalArgumentException(USER_NOT_FOUND + userId));
+        if (!canManageMembers && !user.getAuthUserId().equals(callerId)) {
+            throw new org.springframework.security.access.AccessDeniedException("Only the user or a member manager can change a profile image");
+        }
 
         // Delete the old profile image from storage (best-effort; don't fail the upload)
         if (user.getProfileImage() != null) {
@@ -432,6 +419,10 @@ public class UserService {
     // ── Mapping ────────────────────────────────────────────────────────────
 
     private UserResponse toResponse(TenantUser u, UUID tenantId) {
+        return toResponse(u, tenantId, primaryRoles.code(tenantId, u.getAuthUserId()));
+    }
+
+    private UserResponse toResponse(TenantUser u, UUID tenantId, String primaryRole) {
         UUID profileImageId = u.getProfileImage() != null ? u.getProfileImage().getId() : null;
         return UserResponse.builder()
                 .id(u.getId())
@@ -440,7 +431,7 @@ public class UserService {
                 .firstName(u.getFirstName())
                 .lastName(u.getLastName())
                 .email(u.getEmail())
-                .role(u.getRole() != null ? u.getRole().name() : null)
+                .role(primaryRole)
                 .mobile(u.getMobile())
                 .status(u.getStatus())
                 .profileImageId(profileImageId)

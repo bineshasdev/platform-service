@@ -1,7 +1,7 @@
 package com.flowbinary.platformservice.service;
 
 import com.flowbinary.platformservice.config.KeycloakProperties;
-import com.flowbinary.platformservice.model.PlatformRole;
+import com.flowbinary.platformservice.model.PrincipalType;
 import jakarta.ws.rs.core.Response;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -226,7 +226,8 @@ public class KeycloakUserService {
         userResource.update(user);
     }
 
-    public void assignRealmRole(String userId, PlatformRole role) {
+    /** Gives the user a principal-type realm role (the only realm roles cliniqAI uses). */
+    public void assignRealmRole(String userId, PrincipalType role) {
         RoleRepresentation kcRole = realm().roles().get(role.roleName()).toRepresentation();
         realm().users().get(userId).roles().realmLevel().add(List.of(kcRole));
         log.debug("Assigned realm role '{}' to user {}", role.roleName(), userId);

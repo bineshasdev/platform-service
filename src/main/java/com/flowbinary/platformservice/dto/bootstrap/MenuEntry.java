@@ -15,8 +15,6 @@ public class MenuEntry {
     private String       label;
     private String       icon;
     private String       path;
-    /** Role names that can see this item. Null = visible to all. */
-    private List<String> roles;
     /** Feature code required for this item to appear. Null = no feature gate. */
     private String       feature;
     /** LINK | GROUP | DIVIDER | EXTERNAL. */

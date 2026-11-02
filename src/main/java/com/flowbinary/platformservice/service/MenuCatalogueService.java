@@ -35,7 +35,7 @@ public class MenuCatalogueService {
                             m.getLabel(), m.getIcon(), m.getRoute(), m.getType().name(), m.getBehavior().name(),
                             m.getTarget().name(), m.getPlacement().name(), m.getSortOrder(), m.getDepth(),
                             m.getIsActive(), m.getIsVisible(), editable,
-                            m.getRequiredPrivilege() == null ? null : m.getRequiredPrivilege().getCode(),
+                            m.getRequiredPrivilege(),
                             m.getRequiredFeature(),
                             m.getPlanAccess().stream().map(p -> p.getId().getPlan().name()).sorted().toList(),
                             m.getTenantTypes() == null ? null : m.getTenantTypes().stream().sorted().toList(),

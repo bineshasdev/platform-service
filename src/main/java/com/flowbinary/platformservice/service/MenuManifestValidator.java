@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.model.AuthzPrivilege;
 import com.flowbinary.platformservice.dto.module.MenuManifest;
 import com.flowbinary.platformservice.model.*;
 
@@ -28,13 +29,16 @@ public final class MenuManifestValidator {
     public static final int SCHEMA_VERSION = 1;
     public static final int MAX_ITEMS = 200;
 
+    /** Privileges any module may use to gate an item; every other privilege must belong to the module's own service. */
+    static final String PLATFORM_NAMESPACE = "platform";
+
     static final Pattern KEY    = Pattern.compile("^[a-z0-9][a-z0-9_-]{0,39}$");
     static final Pattern LOCALE = Pattern.compile("^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$");
     static final Pattern PREFIX = Pattern.compile("^/[a-z0-9][a-z0-9/_-]*[a-z0-9_-]$|^/[a-z0-9]$");
 
     /** Lookups outside the manifest. */
     public interface Refs {
-        Optional<Privilege> privilege(String code);
+        Optional<AuthzPrivilege> privilege(String code);
 
         boolean featureExists(String code);
 
@@ -49,7 +53,7 @@ public final class MenuManifestValidator {
     public record ValidItem(String key, String code, String parentKey, String label, String description, String icon,
                             String route, MenuItemType type, MenuBehavior behavior, MenuTarget target,
                             MenuPlacement placement, List<String> tenantTypes, int order,
-                            boolean separatorBefore, Privilege privilege, String feature,
+                            boolean separatorBefore, AuthzPrivilege privilege, String feature,
                             Map<String, String> translations) {
     }
 
@@ -180,13 +184,13 @@ public final class MenuManifestValidator {
         }
 
         // privilege: the only gate a module item has
-        Privilege privilege = null;
+        AuthzPrivilege privilege = null;
         if (it.requiredPrivilege() != null && !it.requiredPrivilege().isBlank()) {
             privilege = refs.privilege(it.requiredPrivilege()).orElse(null);
             if (privilege == null) {
                 errors.add(at + ".requiredPrivilege '" + it.requiredPrivilege() + "' does not exist");
-            } else if (privilege.getModuleCode() != null
-                    && !privilege.getModuleCode().equals(module.getPrivilegeModuleCode())) {
+            } else if (!PLATFORM_NAMESPACE.equals(privilege.getOwnerService())
+                    && !privilege.getOwnerService().equals(module.getPrivilegeModuleCode())) {
                 errors.add(at + ".requiredPrivilege '" + it.requiredPrivilege() + "' belongs to another module");
             }
         } else if (type == MenuItemType.LINK) {

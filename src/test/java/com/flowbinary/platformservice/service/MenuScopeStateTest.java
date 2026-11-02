@@ -65,7 +65,6 @@ class MenuScopeStateTest {
     void rollbackCarriesAssignmentsAndOverrides() {
         UUID user = UUID.randomUUID();
         Map<String, Object> target = new TreeMap<>();
-        target.put("grants:dash", Map.of("roles", List.of("CUSTOM")));
         target.put("override:dash", new LinkedHashMap<>(Map.of("hidden", true)));
         Map<String, Object> current = new TreeMap<>();
         current.put("user:dash:" + user, Map.of("effect", "DENY"));
@@ -73,7 +72,7 @@ class MenuScopeStateTest {
         List<MenuOp> ops = MenuScopeState.opsToReach(current, target);
 
         assertThat(ops).extracting(MenuOp::op).containsExactlyInAnyOrder(
-                MenuOpType.SET_ROLES, MenuOpType.SET_OVERRIDE, MenuOpType.SET_USER_ACCESS);
+                MenuOpType.SET_OVERRIDE, MenuOpType.SET_USER_ACCESS);
         MenuOp clear = ops.stream().filter(o -> o.op() == MenuOpType.SET_USER_ACCESS).findFirst().orElseThrow();
         assertThat(clear.effect()).isNull();            // null effect clears the assignment
         assertThat(clear.userId()).isEqualTo(user);
@@ -88,7 +87,7 @@ class MenuScopeStateTest {
         item.setPlacement(com.flowbinary.platformservice.model.MenuPlacement.TAB);
         item.setTenantTypes(List.of("LAB"));
 
-        var state = MenuScopeState.capture(new MenuScope(app, null), List.of(item), List.of(), List.of(), List.of());
+        var state = MenuScopeState.capture(new MenuScope(app, null), List.of(item), List.of(), List.of());
         @SuppressWarnings("unchecked") Map<String, Object> atom = (Map<String, Object>) state.get("item:lab.worklist");
         assertThat(atom).containsEntry("placement", "TAB").containsEntry("tenantTypes", List.of("LAB"));
 
@@ -116,12 +115,12 @@ class MenuScopeStateTest {
         var tenant = com.flowbinary.platformservice.model.Tenant.builder().build();
         tenant.setId(UUID.randomUUID());
 
-        var global = MenuScopeState.capture(new MenuScope(app, null), List.of(item), List.of(), List.of(), List.of());
+        var global = MenuScopeState.capture(new MenuScope(app, null), List.of(item), List.of(), List.of());
         assertThat(global).containsOnlyKeys("moditem:billing.inv");
         @SuppressWarnings("unchecked") Map<String, Object> atom = (Map<String, Object>) global.get("moditem:billing.inv");
         assertThat(atom).containsEntry("enabled", false).containsEntry("sortOrder", 42);
 
-        assertThat(MenuScopeState.capture(new MenuScope(app, tenant), List.of(item), List.of(), List.of(), List.of())).isEmpty();
+        assertThat(MenuScopeState.capture(new MenuScope(app, tenant), List.of(item), List.of(), List.of())).isEmpty();
     }
 
     @Test

@@ -192,7 +192,7 @@ JOIN (VALUES
         'workflow.definition.view','workflow.definition.manage','workflow.task.approve','ai.assistant.use',
         'integration.connection.manage','integration.data.import','compliance.audit.view',
         'patient.record.register','patient.record.view','scheduling.appointment.view','scheduling.appointment.book',
-        'scheduling.appointment.reschedule','scheduling.calendar.manage','referral.request.view']),
+        'scheduling.appointment.reschedule','scheduling.calendar.manage','referral.request.view','billing.claim.manage']),
     ('CLINIC', 'doctor', ARRAY[
         'platform.dashboard.view','platform.document.view','platform.report.view','patient.record.view',
         'scheduling.appointment.view','clinical.encounter.view','clinical.encounter.chart','clinical.encounter.sign',
@@ -211,7 +211,7 @@ JOIN (VALUES
         'billing.invoice.create','billing.payment.collect','billing.claim.manage','platform.subscription.view']),
     ('CLINIC', 'medical_coder', ARRAY[
         'platform.dashboard.view','platform.report.view','clinical.encounter.view','billing.coding.suggest',
-        'billing.coding.assign']),
+        'billing.coding.assign','ai.assistant.use']),
     ('CLINIC', 'compliance_officer', ARRAY[
         'platform.dashboard.view','platform.report.view','compliance.audit.view','compliance.consent.manage',
         'compliance.access.monitor']),
@@ -222,11 +222,10 @@ JOIN (VALUES
         'platform.dashboard.view','platform.document.view','platform.document.create','platform.document.edit',
         'platform.report.view','platform.member.view','platform.member.invite','platform.member.manage',
         'platform.role.manage','platform.settings.manage','platform.branding.manage','platform.navigation.manage',
-        'platform.navigation.edit','platform.navigation.publish','platform.subscription.view','platform.subscription.manage','compliance.audit.view',
+        'platform.navigation.edit','platform.navigation.publish','platform.subscription.view','platform.subscription.manage',
         'integration.connection.manage','patient.record.register','patient.record.view','lab.order.create',
         'lab.result.enter','lab.result.view','lab.sample.manage','lab.catalog.manage','billing.invoice.create',
-        'billing.invoice.view','billing.payment.collect','scheduling.appointment.view','scheduling.appointment.book',
-        'scheduling.appointment.reschedule','scheduling.calendar.manage']),
+        'billing.invoice.view','billing.payment.collect']),
     ('LAB', 'lab_technician', ARRAY[
         'platform.dashboard.view','platform.document.view','patient.record.view','lab.result.enter',
         'lab.result.view','lab.sample.manage']),

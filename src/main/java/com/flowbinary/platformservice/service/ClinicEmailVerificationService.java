@@ -1,12 +1,12 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.service.PrimaryRoles;
 import com.flowbinary.platformservice.dto.otp.SendOtpResponse;
 import com.flowbinary.platformservice.dto.registration.EmailVerificationResponse;
 import com.flowbinary.platformservice.exception.InvalidOtpException;
 import com.flowbinary.platformservice.exception.OtpAttemptsExceededException;
 import com.flowbinary.platformservice.exception.OtpExpiredException;
 import com.flowbinary.platformservice.model.OtpChannel;
-import com.flowbinary.platformservice.model.PlatformRole;
 import com.flowbinary.platformservice.model.Tenant;
 import com.flowbinary.platformservice.model.TenantUser;
 import com.flowbinary.platformservice.repository.ClinicRepository;
@@ -43,6 +43,7 @@ public class ClinicEmailVerificationService {
 
     static final String PURPOSE = "CLINIC_EMAIL_VERIFY";
 
+    private final PrimaryRoles primaryRoles;
     private final TenantRepository     tenantRepository;
     private final TenantUserRepository tenantUserRepository;
     private final ClinicRepository     clinicRepository;
@@ -148,8 +149,10 @@ public class ClinicEmailVerificationService {
     }
 
     private java.util.Optional<TenantUser> adminUser(Tenant tenant) {
-        List<TenantUser> admins = tenantUserRepository.findByTenantIdAndRole(tenant.getId(), PlatformRole.TENANTADMIN);
-        return admins.stream().findFirst();
+        return primaryRoles.adminSubs(tenant.getId()).stream()
+                .map(sub -> tenantUserRepository.findByTenantIdAndAuthUserId(tenant.getId(), sub))
+                .flatMap(java.util.Optional::stream)
+                .findFirst();
     }
 
     private EmailVerificationResponse sent(Tenant tenant, SendOtpResponse sent) {

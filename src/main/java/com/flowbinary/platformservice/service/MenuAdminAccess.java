@@ -1,5 +1,6 @@
 package com.flowbinary.platformservice.service;
 
+import com.flowbinary.platformservice.authz.service.Operators;
 import com.flowbinary.platformservice.model.*;
 import com.flowbinary.platformservice.repository.ApplicationRepository;
 import com.flowbinary.platformservice.repository.TenantRepository;
@@ -44,13 +45,11 @@ public class MenuAdminAccess {
     private final TenantRepository          tenantRepository;
     private final ApplicationRepository     applicationRepository;
     private final MenuResolutionService     menuResolutionService;
+    private final Operators                 operators;
 
     /** The acting administrator, their scope, and what they hold. */
-    public record AdminContext(TenantUser actor, Tenant actorTenant, MenuScope scope, Set<String> privileges) {
-
-        public boolean isOperator() {
-            return actor.getRole() == PlatformRole.SUPERADMIN;
-        }
+    public record AdminContext(TenantUser actor, Tenant actorTenant, MenuScope scope, Set<String> privileges,
+                               boolean isOperator) {
 
         public boolean has(String privilege) {
             return privileges.contains("*") || privileges.contains(privilege);
@@ -77,7 +76,7 @@ public class MenuAdminAccess {
                 .findByTenantIdAndAuthUserId(actorTenant.getId(), authUserId)
                 .orElseThrow(() -> new TenantNotFoundException("User not found in tenant: " + authUserId));
 
-        boolean operator = actor.getRole() == PlatformRole.SUPERADMIN;
+        boolean operator = operators.is(authUserId);
         Application app = applicationRepository.findByCode(applicationCode)
                 .orElseThrow(() -> new NoSuchElementException("Unknown application " + applicationCode));
 
@@ -95,6 +94,6 @@ public class MenuAdminAccess {
             }
             scope = new MenuScope(app, tenant);
         }
-        return new AdminContext(actor, actorTenant, scope, menuResolutionService.effectivePrivileges(actor));
+        return new AdminContext(actor, actorTenant, scope, menuResolutionService.effectivePrivileges(actor), operator);
     }
 }
